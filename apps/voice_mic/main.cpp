@@ -1,9 +1,14 @@
 #include <atomic>
-#include <csignal>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <string>
+
+#ifdef _WIN32
+#  include <windows.h>
+#else
+#  include <csignal>
+#endif
 
 #include "mev/app/application.hpp"
 #include "mev/config/app_config.hpp"
@@ -11,12 +16,32 @@
 #include "mev/pipeline/pipeline_orchestrator.hpp"
 
 // ---------------------------------------------------------------------------
-// Global shutdown flag set by SIGINT/SIGTERM handler.
+// Global shutdown flag — set by OS signal / console-ctrl handler.
 // ---------------------------------------------------------------------------
 static std::atomic<bool> g_shutdown_requested{false};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-static void signal_handler(int /*signum*/) {
-  g_shutdown_requested.store(true, std::memory_order_relaxed);
+static void install_signal_handlers() {
+#ifdef _WIN32
+  SetConsoleCtrlHandler(
+      [](DWORD event) -> BOOL {
+        if (event == CTRL_C_EVENT || event == CTRL_CLOSE_EVENT ||
+            event == CTRL_BREAK_EVENT) {
+          g_shutdown_requested.store(true, std::memory_order_relaxed);
+          return TRUE;
+        }
+        return FALSE;
+      },
+      TRUE);
+#else
+  struct sigaction sa{};
+  sa.sa_handler = [](int) {
+    g_shutdown_requested.store(true, std::memory_order_relaxed);
+  };
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESTART;
+  sigaction(SIGINT,  &sa, nullptr);
+  sigaction(SIGTERM, &sa, nullptr);
+#endif
 }
 
 static void print_usage(const char* prog) {
@@ -129,8 +154,7 @@ int main(int argc, char** argv) {
   }
 
   // Install signal handlers for clean shutdown.
-  std::signal(SIGINT,  signal_handler);
-  std::signal(SIGTERM, signal_handler);
+  install_signal_handlers();
 
   // Load config.
   mev::AppConfig config = mev::default_config();

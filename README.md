@@ -4,8 +4,8 @@ Local real-time voice pipeline in C++20: captures Spanish speech from a micropho
 translates it to English with Whisper, synthesizes audio with Piper TTS, and routes
 it to a virtual microphone device for use in video calls.
 
-**Target OS:** Linux (PipeWire / ALSA loopback). macOS (BlackHole) and Windows
-(VB-Cable) are planned; interfaces are designed for it.
+**Target OS:** Linux (PipeWire / ALSA loopback) and Windows 11 (VB-Cable / WASAPI).
+macOS (BlackHole) is planned.
 
 ---
 
@@ -99,14 +99,14 @@ C++ standard: **C++20** (requires GCC ≥ 13 or Clang ≥ 16).
 
 ## System dependencies
 
-### Required
+### Linux — Required
 
 ```bash
 # Ubuntu/Debian
 sudo apt install cmake ninja-build g++-13 libpthread-stubs0-dev
 ```
 
-### Optional — install only the backends you want
+### Linux — Optional backends
 
 ```bash
 # Audio I/O (for -DMEV_ENABLE_PORTAUDIO=ON)
@@ -125,12 +125,49 @@ sudo apt install libsamplerate0-dev
 # -DMEV_ENABLE_WHISPER_CPP=ON; no apt package needed.
 ```
 
-### ONNX Runtime (for Piper TTS with -DMEV_ENABLE_ONNXRUNTIME=ON)
+### Linux — ONNX Runtime (for Piper TTS with -DMEV_ENABLE_ONNXRUNTIME=ON)
 
 ```bash
 wget https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-linux-x64-gpu-1.17.3.tgz
 tar xzf onnxruntime-linux-x64-gpu-1.17.3.tgz
 export ONNXRUNTIME_ROOT=$(pwd)/onnxruntime-linux-x64-gpu-1.17.3
+```
+
+### Windows — Required
+
+- **Visual Studio 2022** (MSVC v143) or later, with the **C++ CMake tools** workload
+- **CMake ≥ 3.25** and **Ninja** (both bundled with VS2022)
+- **vcpkg** (recommended for native libs):
+
+```powershell
+git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+C:\vcpkg\bootstrap-vcpkg.bat
+# Integrate with MSBuild/CMake
+C:\vcpkg\vcpkg integrate install
+```
+
+### Windows — Optional backends via vcpkg
+
+```powershell
+# Audio I/O
+vcpkg install portaudio:x64-windows
+
+# TTS fallback
+vcpkg install espeak-ng:x64-windows
+
+# Resampling
+vcpkg install libsamplerate:x64-windows
+```
+
+### Windows — ONNX Runtime
+
+Download the pre-built package from GitHub Releases:
+
+```powershell
+# GPU build (CUDA 12)
+Invoke-WebRequest -Uri https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-win-x64-gpu-1.17.3.zip -OutFile onnxruntime.zip
+Expand-Archive onnxruntime.zip -DestinationPath .
+$env:ONNXRUNTIME_ROOT = "$PWD\onnxruntime-win-x64-gpu-1.17.3"
 ```
 
 ---
@@ -145,7 +182,7 @@ cmake --build --preset debug -j$(nproc)
 ctest --preset debug --output-on-failure
 ```
 
-### Full build (all real backends)
+### Full build — Linux (all real backends)
 
 ```bash
 cmake -B build/release \
@@ -160,6 +197,28 @@ cmake -B build/release \
   -DONNXRUNTIME_ROOT=${ONNXRUNTIME_ROOT}
 cmake --build build/release -j$(nproc)
 ```
+
+### Full build — Windows (MSVC + vcpkg)
+
+Open a **Developer PowerShell for VS 2022**, then:
+
+```powershell
+cmake -B build\release -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
+  -DVCPKG_TARGET_TRIPLET=x64-windows `
+  -DMEV_ENABLE_GPU=ON `
+  -DMEV_ENABLE_PORTAUDIO=ON `
+  -DMEV_ENABLE_WHISPER_CPP=ON `
+  -DMEV_ENABLE_ONNXRUNTIME=ON `
+  -DMEV_ENABLE_ESPEAK=ON `
+  -DMEV_ENABLE_LIBSAMPLERATE=ON `
+  -DMEV_ENABLE_WEBRTCVAD=ON `
+  -DONNXRUNTIME_ROOT="$env:ONNXRUNTIME_ROOT"
+cmake --build build\release
+```
+
+`onnxruntime.dll` is copied automatically next to the executable.
 
 ### Selective feature build
 
@@ -224,19 +283,48 @@ wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/me
 
 ---
 
-## Virtual microphone setup (Linux)
+## Virtual microphone setup
 
-### Option A — PipeWire (recommended)
+### Windows — VB-Cable (recommended)
+
+1. Download and install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/).
+2. In `config/pipeline.toml`, set:
+   ```toml
+   [audio]
+   output_device = "CABLE Input"   # substring match against PortAudio device name
+   ```
+3. In Google Meet / Zoom / Teams, select **CABLE Output** as the microphone.
+
+> **Tip:** Use `--audio.output_device "CABLE Input"` on the CLI to override without editing the TOML.
+
+### Linux — PipeWire (recommended)
 
 ```bash
 # Create a virtual audio sink that appears as a microphone in apps
 pw-loopback \
   --capture-props='media.class=Audio/Sink node.name=VoicePipeline node.description=VoicePipeline' &
 
+# In config/pipeline.toml:
+#   output_device = "VoicePipeline"
+
 # In Google Meet / Zoom: select "VoicePipeline" as the microphone input
 ```
 
-### Option B — ALSA loopback
+### Linux — PulseAudio null-sink (WSL2 / older systems)
+
+```bash
+# Load a null sink and expose its monitor as a source
+pactl load-module module-null-sink sink_name=VoicePipeline \
+    sink_properties=device.description=VoicePipeline
+pactl load-module module-virtual-source source_name=VoicePipelineMic \
+    master=VoicePipeline.monitor
+
+# In config/pipeline.toml:
+#   output_device = "VoicePipeline"
+# In Google Meet / Zoom: select "VoicePipelineMic"
+```
+
+### Linux — ALSA loopback
 
 ```bash
 sudo modprobe snd-aloop
@@ -316,6 +404,5 @@ Any config field can be overridden after TOML load with `--<section>.<key> <valu
 |------|-------|
 | XTTSv2 | When stable ONNX export is available (`ITTSEngine` interface ready) |
 | macOS support | BlackHole virtual mic + CoreAudio backend |
-| Windows support | VB-Cable + WASAPI backend |
 | Partial hypotheses | Streaming text output from Whisper for lower perceived latency |
 | piper-phonemize | Accurate text-to-phoneme conversion for Piper TTS (currently ASCII placeholder) |
