@@ -1,0 +1,625 @@
+#include "mev/pipeline/pipeline_orchestrator.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cstring>
+#include <memory>
+#include <thread>
+
+#include "mev/asr/whisper_asr_stub.hpp"
+#include "mev/audio/simulated_audio_input.hpp"
+#include "mev/audio/simulated_audio_output.hpp"
+#include "mev/core/logger.hpp"
+#include "mev/core/profiling.hpp"
+#include "mev/domain/domain_context_manager.hpp"
+#include "mev/domain/technical_domain_adapter.hpp"
+#include "mev/infra/metrics.hpp"
+#include "mev/tts/espeak_tts_engine.hpp"
+#include "mev/tts/piper_tts_engine.hpp"
+#include "mev/tts/stub_tts_engine.hpp"
+
+// ---------------------------------------------------------------------------
+// Thread model (7 threads):
+//   Thread 0 (RT): on_audio_input_callback  — bounded copy, atomic counter only
+//   Thread 1 (RT): on_audio_output_callback — bounded dequeue, silence on underrun
+//   Thread 2:      ingest_loop              — VAD/windowing, builds Utterances
+//   Thread 3:      asr_loop                 — Whisper inference, GPU-priority
+//   Thread 4:      text_loop                — domain correction + TTS scheduling
+//     TRADEOFF: text_loop is cheap (~1-5ms). Merging into Thread 3 saves one
+//     context switch but couples ASR inference with I/O-bound domain lookups.
+//     Keeping them separate is safer for MVP.
+//   Thread 5:      tts_loop                 — Piper/eSpeak synthesis
+//   Thread 6 (low): supervisor_loop         — watchdog, degradation, metrics
+//
+// Queue map (all SPSC, bounded, overflow=drop+metric):
+//   input_ring_    : RawAudioBlock         T0→T2
+//   ingest_to_asr_ : unique_ptr<Utterance> T2→T3
+//   asr_to_text_   : unique_ptr<Utterance> T3→T4
+//   text_to_tts_   : unique_ptr<Utterance> T4→T5
+//   tts_to_output_ : OutputAudioBlock      T5→T1
+// ---------------------------------------------------------------------------
+
+namespace mev {
+
+namespace {
+
+constexpr std::size_t kSleepMicros = 500;
+
+std::unique_ptr<ITTSEngine> make_tts_engine(const std::string& engine_name,
+                                             const TtsConfig& cfg, std::string& error) {
+  std::unique_ptr<ITTSEngine> engine;
+  if (engine_name == "piper") {
+    engine = std::make_unique<PiperTTSEngine>();
+  } else if (engine_name == "espeak") {
+    engine = std::make_unique<EspeakTTSEngine>();
+  } else {
+    engine = std::make_unique<StubTTSEngine>();
+  }
+
+  TTSConfig tts_cfg;
+  tts_cfg.engine             = engine_name;
+  tts_cfg.model_path         = cfg.model_path;
+  tts_cfg.piper_data_path    = cfg.piper_data_path;
+  tts_cfg.speaker_id         = cfg.speaker_id;
+  tts_cfg.gpu_enabled        = cfg.enable_gpu;
+  tts_cfg.output_sample_rate = cfg.output_sample_rate;
+
+  if (!engine->initialize(tts_cfg, error)) {
+    return nullptr;
+  }
+  return engine;
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+PipelineOrchestrator::PipelineOrchestrator(AppConfig config) : config_(std::move(config)) {}
+PipelineOrchestrator::~PipelineOrchestrator() { stop(); }
+
+// ---------------------------------------------------------------------------
+bool PipelineOrchestrator::start() {
+  PipelineState expected = PipelineState::kStopped;
+  if (!state_.compare_exchange_strong(expected, PipelineState::kStarting)) return false;
+
+  Logger::instance().set_level(config_.logging.level);
+
+  std::string error;
+  if (!validate_config(config_, error)) {
+    MEV_LOG_ERROR("invalid config: ", error);
+    state_.store(PipelineState::kFailed, std::memory_order_release);
+    return false;
+  }
+
+  if (!initialize_components()) {
+    state_.store(PipelineState::kFailed, std::memory_order_release);
+    return false;
+  }
+
+  if (!warmup_models()) {
+    state_.store(PipelineState::kFailed, std::memory_order_release);
+    return false;
+  }
+
+  // Start downstream workers first to avoid queue back-pressure before upstream is ready.
+  supervisor_thread_ = std::jthread([this](std::stop_token t) { supervisor_loop(t); });
+  tts_thread_        = std::jthread([this](std::stop_token t) { tts_loop(t); });
+  text_thread_       = std::jthread([this](std::stop_token t) { text_loop(t); });
+  asr_thread_        = std::jthread([this](std::stop_token t) { asr_loop(t); });
+  ingest_thread_     = std::jthread([this](std::stop_token t) { ingest_loop(t); });
+
+  const bool out_ok = audio_output_->start(
+      [this](float* out, std::size_t frames, std::uint16_t ch, std::uint32_t sr) {
+        on_audio_output_callback(out, frames, ch, sr);
+      });
+  const bool in_ok = audio_input_->start(
+      [this](const float* in, std::size_t frames, std::uint16_t ch, std::uint32_t sr) {
+        on_audio_input_callback(in, frames, ch, sr);
+      });
+
+  if (!out_ok || !in_ok) {
+    MEV_LOG_ERROR("audio backend failed to start");
+    stop();
+    state_.store(PipelineState::kFailed, std::memory_order_release);
+    return false;
+  }
+
+  state_.store(PipelineState::kRunning, std::memory_order_release);
+  MEV_LOG_INFO("pipeline running — input=", audio_input_->name(),
+               " asr=", asr_engine_->name(),
+               " tts=", tts_engine_->engine_name(),
+               " mode=NORMAL");
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+void PipelineOrchestrator::stop() {
+  const auto prev = state_.load(std::memory_order_acquire);
+  if (prev == PipelineState::kStopped || prev == PipelineState::kStopping) return;
+
+  state_.store(PipelineState::kStopping, std::memory_order_release);
+
+  if (audio_input_)  audio_input_->stop();
+  if (audio_output_) audio_output_->stop();
+
+  auto stop_thread = [](std::jthread& t) {
+    if (t.joinable()) { t.request_stop(); t.join(); }
+  };
+
+  stop_thread(ingest_thread_);
+  stop_thread(asr_thread_);
+  stop_thread(text_thread_);
+  stop_thread(tts_thread_);
+  stop_thread(supervisor_thread_);
+
+  if (tts_engine_)          tts_engine_->shutdown();
+  if (tts_fallback_engine_) tts_fallback_engine_->shutdown();
+
+  state_.store(PipelineState::kStopped, std::memory_order_release);
+}
+
+// ---------------------------------------------------------------------------
+bool PipelineOrchestrator::initialize_components() {
+  input_ring_    = std::make_unique<SpscRingBuffer<RawAudioBlock>>(config_.audio.input_ring_capacity);
+  ingest_to_asr_ = std::make_unique<SpscRingBuffer<std::unique_ptr<Utterance>>>(config_.queues.ingest_to_asr_capacity);
+  asr_to_text_   = std::make_unique<SpscRingBuffer<std::unique_ptr<Utterance>>>(config_.queues.asr_to_text_capacity);
+  text_to_tts_   = std::make_unique<SpscRingBuffer<std::unique_ptr<Utterance>>>(config_.pipeline.max_queue_depth + 2U);
+  tts_to_output_ = std::make_unique<SpscRingBuffer<OutputAudioBlock>>(config_.audio.output_ring_capacity);
+
+  // TODO(next): replace with PortAudio/RtAudio; preserve RT-safe callbacks
+  // TODO: macOS support via BlackHole
+  // TODO: Windows support via VB-Cable
+  audio_input_  = std::make_unique<SimulatedAudioInput>(
+      config_.audio.sample_rate_hz, config_.audio.input_channels, config_.audio.frames_per_buffer);
+  audio_output_ = std::make_unique<SimulatedAudioOutput>(
+      config_.audio.sample_rate_hz, config_.audio.output_channels, config_.audio.frames_per_buffer);
+
+  // TODO(next): replace WhisperAsrStub with whisper.cpp wrapper
+  //   - translate mode (es→en), initial_prompt injection
+  //   - TODO(next): partial hypothesis support
+  asr_engine_ = std::make_unique<WhisperAsrStub>(config_.asr.model_path, config_.asr.enable_gpu);
+
+  std::string tts_error;
+  tts_engine_ = make_tts_engine(config_.tts.engine, config_.tts, tts_error);
+  if (!tts_engine_) {
+    MEV_LOG_ERROR("TTS '", config_.tts.engine, "' failed: ", tts_error,
+                  " — trying fallback '", config_.tts.fallback_engine, "'");
+    tts_engine_ = make_tts_engine(config_.tts.fallback_engine, config_.tts, tts_error);
+    if (!tts_engine_) {
+      MEV_LOG_ERROR("TTS fallback also failed: ", tts_error);
+      return false;
+    }
+    transition_to_mode(PipelineMode::DEGRADED);
+  }
+
+  // Always keep an eSpeak engine ready for MINIMAL mode.
+  {
+    std::string fb_err;
+    tts_fallback_engine_ = make_tts_engine("espeak", config_.tts, fb_err);
+    // Non-fatal: eSpeak may not be installed
+  }
+
+  domain_context_ = std::make_shared<DomainContextManager>(config_.domain);
+  domain_adapter_ = std::make_unique<TechnicalDomainAdapter>(domain_context_);
+  std::string domain_err;
+  if (!domain_adapter_->initialize(config_.domain, domain_err)) {
+    MEV_LOG_WARN("domain adapter init: ", domain_err);
+  }
+
+  tts_scheduler_ = std::make_unique<TtsScheduler>(TtsSchedulerPolicy{
+      .max_queue_depth     = config_.pipeline.max_queue_depth,
+      .backlog_soft_limit  = static_cast<std::size_t>(config_.pipeline.max_queue_depth / 2U),
+      .stale_after_ms      = config_.pipeline.stale_after_ms,
+      .stale_after_n_newer = config_.pipeline.stale_after_n_newer,
+      .drop_policy         = config_.pipeline.drop_policy,
+  });
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+bool PipelineOrchestrator::warmup_models() {
+  const auto t0 = std::chrono::steady_clock::now();
+
+  std::string error;
+  if (!asr_engine_->warmup(error)) {
+    MEV_LOG_ERROR("ASR warmup failed: ", error);
+    if (!config_.resilience.enable_degradation) return false;
+    MEV_LOG_WARN("degrading to MINIMAL mode after ASR warmup failure");
+    transition_to_mode(PipelineMode::MINIMAL);
+  }
+
+  tts_engine_->warmup();
+
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - t0).count();
+  MEV_LOG_INFO("warmup completed in ", ms, "ms — pipeline ready");
+
+  // NOTE: the ingest worker checks pipeline_ready_ before forwarding chunks.
+  set_ready(true);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+void PipelineOrchestrator::transition_to_mode(const PipelineMode mode) {
+  const auto prev = mode_.exchange(mode, std::memory_order_acq_rel);
+  if (prev == mode) return;
+  switch (mode) {
+    case PipelineMode::DEGRADED:    MEV_LOG_WARN("[DEGRADATION] mode=DEGRADED"); break;
+    case PipelineMode::MINIMAL:     MEV_LOG_ERROR("[DEGRADATION] mode=MINIMAL"); break;
+    case PipelineMode::PASSTHROUGH: MEV_LOG_ERROR("[DEGRADATION] mode=PASSTHROUGH"); break;
+    case PipelineMode::NORMAL:      MEV_LOG_INFO("[RECOVERY] mode=NORMAL"); break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+bool PipelineOrchestrator::try_activate_tts_on_gpu() {
+  if (!config_.gpu.enabled || !config_.gpu.asr_priority) return true;
+  if (gpu_scheduler_.tts_try_acquire()) return true;
+  if (config_.gpu.tts_cpu_fallback_on_contention) {
+    metrics_.inc_gpu_contention_fallback();
+    MEV_LOG_DEBUG("TTS falling back to CPU (ASR holds GPU)");
+    return false;
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  return gpu_scheduler_.tts_try_acquire();
+}
+
+// ---------------------------------------------------------------------------
+// RT callbacks — ZERO allocations, ZERO blocking
+// ---------------------------------------------------------------------------
+void PipelineOrchestrator::on_audio_input_callback(const float* input, const std::size_t frames,
+                                                    const std::uint16_t channels,
+                                                    const std::uint32_t sample_rate) {
+  if (frames > kMaxFramesPerBlock || channels == 0 || channels > kMaxAudioChannels) {
+    metrics_.inc_input_overrun();
+    return;
+  }
+  RawAudioBlock block;
+  block.sequence    = input_sequence_.fetch_add(1, std::memory_order_relaxed);
+  block.capture_time = Clock::now();
+  block.frames      = static_cast<std::uint16_t>(frames);
+  block.channels    = channels;
+  block.sample_rate = sample_rate;
+  std::memcpy(block.interleaved.data(), input, frames * channels * sizeof(float));
+
+  if (!input_ring_->try_push(std::move(block))) {
+    metrics_.inc_input_overrun();
+  }
+}
+
+void PipelineOrchestrator::on_audio_output_callback(float* output, const std::size_t frames,
+                                                     const std::uint16_t channels,
+                                                     const std::uint32_t /*sample_rate*/) {
+  if (mode_.load(std::memory_order_relaxed) == PipelineMode::PASSTHROUGH) {
+    std::fill(output, output + frames * channels, 0.0F);
+    return;
+  }
+
+  for (std::size_t frame = 0; frame < frames; ++frame) {
+    if (!has_current_output_block_ || current_output_offset_ >= current_output_block_.frames) {
+      OutputAudioBlock next;
+      if (!tts_to_output_->try_pop(next)) {
+        for (std::uint16_t ch = 0; ch < channels; ++ch) {
+          output[frame * channels + ch] = 0.0F;
+        }
+        metrics_.inc_output_underrun();
+        continue;
+      }
+      current_output_block_  = std::move(next);
+      current_output_offset_ = 0;
+      has_current_output_block_ = true;
+    }
+    const float s = current_output_block_.mono[current_output_offset_++];
+    for (std::uint16_t ch = 0; ch < channels; ++ch) {
+      output[frame * channels + ch] = s;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Thread 2 — Ingest Worker
+// ---------------------------------------------------------------------------
+void PipelineOrchestrator::ingest_loop(std::stop_token token) {
+  std::vector<float> rolling_pcm;
+  rolling_pcm.reserve(static_cast<std::size_t>(config_.audio.sample_rate_hz) * 4U);
+
+  std::size_t consumed_offset = 0;
+  const auto chunk_samples = (static_cast<std::uint64_t>(config_.asr.chunk_ms) *
+                               config_.audio.sample_rate_hz) / 1000ULL;
+  const auto hop_samples   = (static_cast<std::uint64_t>(config_.asr.hop_ms) *
+                               config_.audio.sample_rate_hz) / 1000ULL;
+
+  // TODO(v2): VAD-based chunking:
+  //   - Instantiate Silero ONNX or libfvad depending on vad.engine.
+  //   - Accumulate while VAD detects speech.
+  //   - Close chunk on silence > vad.silence_duration_ms.
+  //   - Force-close on vad.max_chunk_duration_ms to bound latency.
+  //   - Prepend vad.leading_pad_ms of pre-speech audio.
+  //   - Inject previous utterance text as Whisper initial_prompt (sliding context).
+
+  while (!token.stop_requested()) {
+    RawAudioBlock block;
+    if (!input_ring_->try_pop(block)) {
+      std::this_thread::sleep_for(std::chrono::microseconds(kSleepMicros));
+      continue;
+    }
+
+    MEV_PROFILE_SCOPE("ingest_frame");
+    StageTimer timer(metrics_, StageId::kAudioIngest);
+    const auto capture_time = block.capture_time;
+
+    for (std::size_t frame = 0; frame < block.frames; ++frame) {
+      float mono = 0.0F;
+      for (std::size_t ch = 0; ch < block.channels; ++ch) {
+        mono += block.interleaved[frame * block.channels + ch];
+      }
+      rolling_pcm.push_back(mono / static_cast<float>(block.channels));
+    }
+
+    while (!token.stop_requested() &&
+           (rolling_pcm.size() - consumed_offset) >= chunk_samples) {
+
+      if (!pipeline_ready_.load(std::memory_order_acquire)) {
+        // Warmup not complete — advance pointer to discard frames.
+        consumed_offset += hop_samples;
+        continue;
+      }
+
+      auto utt = std::make_unique<Utterance>();
+      utt->id    = next_utterance_id_.fetch_add(1, std::memory_order_relaxed);
+      utt->state = UtteranceState::QUEUED_FOR_ASR;
+      utt->metrics.capture_start = capture_time;
+      utt->metrics.capture_end   = Clock::now();
+      utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
+
+      // TODO(v2): resample to 16 kHz here using libsamplerate (preallocated buffer).
+      utt->source_pcm.assign(
+          rolling_pcm.begin() + static_cast<long long>(consumed_offset),
+          rolling_pcm.begin() + static_cast<long long>(consumed_offset + chunk_samples));
+
+      if (!ingest_to_asr_->try_push(std::move(utt))) {
+        metrics_.inc_queue_drop();
+      } else {
+        metrics_.inc_asr_requests();
+      }
+      consumed_offset += hop_samples;
+    }
+
+    // TRADEOFF: erase is O(n). A fixed ring-index avoids the copy but requires
+    // more careful boundary management. Accept for MVP; revisit if ingest CPU > 2%.
+    if (consumed_offset > rolling_pcm.size() / 2U) {
+      rolling_pcm.erase(rolling_pcm.begin(),
+                        rolling_pcm.begin() + static_cast<long long>(consumed_offset));
+      consumed_offset = 0;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Thread 3 — ASR Worker
+// ---------------------------------------------------------------------------
+void PipelineOrchestrator::asr_loop(std::stop_token token) {
+  while (!token.stop_requested()) {
+    std::unique_ptr<Utterance> utt;
+    if (!ingest_to_asr_->try_pop(utt)) {
+      std::this_thread::sleep_for(std::chrono::microseconds(kSleepMicros));
+      continue;
+    }
+    if (!utt) continue;
+
+    utt->state = UtteranceState::TRANSCRIBING;
+    utt->metrics.asr_start = Clock::now();
+
+    {
+      AsrGpuGuard gpu_guard(gpu_scheduler_);  // ASR holds GPU for duration of inference
+      MEV_PROFILE_SCOPE("asr_inference");
+      StageTimer timer(metrics_, StageId::kAsr);
+
+      AsrRequest req;
+      req.sequence    = static_cast<SequenceNumber>(utt->id);
+      req.created_at  = utt->metrics.capture_start;
+      req.sample_rate = config_.audio.sample_rate_hz;
+      req.prompt_hint = utt->asr_prompt_hint;
+      req.mono_pcm    = utt->source_pcm;
+
+      auto partial = asr_engine_->transcribe_incremental(req);
+      utt->source_text     = partial.source_text_es;
+      utt->translated_text = partial.translated_text_en;
+    }
+
+    utt->metrics.asr_end = Clock::now();
+    utt->state = UtteranceState::COMMITTED;
+
+    if (!asr_to_text_->try_push(std::move(utt))) {
+      metrics_.inc_queue_drop();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Thread 4 — Text Processing Worker
+// ---------------------------------------------------------------------------
+void PipelineOrchestrator::text_loop(std::stop_token token) {
+  while (!token.stop_requested()) {
+    std::unique_ptr<Utterance> utt;
+    if (!asr_to_text_->try_pop(utt)) {
+      std::this_thread::sleep_for(std::chrono::microseconds(kSleepMicros));
+      continue;
+    }
+    if (!utt) continue;
+
+    utt->state = UtteranceState::NORMALIZING;
+
+    {
+      StageTimer norm_timer(metrics_, StageId::kNormalize);
+      MEV_PROFILE_SCOPE("text_processing");
+
+      const auto corrected = domain_adapter_->correct_asr_output(utt->translated_text);
+      domain_adapter_->update_session_context(corrected);
+      utt->normalized_text = domain_adapter_->prepare_for_tts(corrected);
+    }
+
+    utt->metrics.normalize_end = Clock::now();
+
+    if (utt->normalized_text.empty()) {
+      utt->state = UtteranceState::DROPPED;
+      continue;
+    }
+
+    const auto queue_depth = text_to_tts_->size_approx();
+    auto scheduled = tts_scheduler_->schedule(std::move(utt), queue_depth);
+    if (!scheduled) {
+      metrics_.inc_queue_drop();
+      continue;
+    }
+
+    if (!text_to_tts_->try_push(std::move(scheduled))) {
+      metrics_.inc_queue_drop();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Thread 5 — TTS Worker
+// ---------------------------------------------------------------------------
+void PipelineOrchestrator::tts_loop(std::stop_token token) {
+  while (!token.stop_requested()) {
+    std::unique_ptr<Utterance> utt;
+    if (!text_to_tts_->try_pop(utt)) {
+      std::this_thread::sleep_for(std::chrono::microseconds(kSleepMicros));
+      continue;
+    }
+    if (!utt) continue;
+
+    if (tts_scheduler_->should_cancel_as_stale(*utt, Clock::now())) {
+      metrics_.inc_stale_cancelled();
+      utt->state = UtteranceState::DROPPED;
+      MEV_LOG_DEBUG("[DROPPED] id=", utt->id, " reason=stale");
+      continue;
+    }
+
+    utt->state = UtteranceState::SYNTHESIZING;
+    utt->metrics.tts_start = Clock::now();
+
+    const bool use_gpu = try_activate_tts_on_gpu();
+
+    {
+      MEV_PROFILE_SCOPE("tts_inference");
+      StageTimer tts_timer(metrics_, StageId::kTts);
+      metrics_.inc_tts_requests();
+
+      bool ok = tts_engine_->synthesize(utt->normalized_text, utt->synth_pcm);
+      if (!ok && tts_fallback_engine_) {
+        MEV_LOG_WARN("primary TTS failed; using fallback for id=", utt->id);
+        ok = tts_fallback_engine_->synthesize(utt->normalized_text, utt->synth_pcm);
+        metrics_.inc_degradation_event();
+      }
+
+      if (!ok || utt->synth_pcm.empty()) {
+        utt->state = UtteranceState::FAILED;
+        if (use_gpu) gpu_scheduler_.tts_release();
+        continue;
+      }
+    }
+
+    if (use_gpu) gpu_scheduler_.tts_release();
+
+    utt->metrics.tts_end    = Clock::now();
+    utt->metrics.output_start = Clock::now();
+    utt->state = UtteranceState::QUEUED_FOR_OUTPUT;
+
+    // TODO(v2): resample synth_pcm from tts_engine_->output_sample_rate()
+    //   to config_.audio.sample_rate_hz using libsamplerate (preallocated buffer).
+
+    std::size_t offset = 0;
+    while (offset < utt->synth_pcm.size()) {
+      OutputAudioBlock blk;
+      blk.sequence = static_cast<SequenceNumber>(utt->id);
+      const auto remaining = utt->synth_pcm.size() - offset;
+      blk.frames = static_cast<std::uint16_t>(
+          std::min<std::size_t>(remaining, config_.audio.frames_per_buffer));
+      std::copy_n(utt->synth_pcm.begin() + static_cast<long long>(offset),
+                  blk.frames, blk.mono.begin());
+      offset += blk.frames;
+      if (!tts_to_output_->try_push(std::move(blk))) {
+        metrics_.inc_queue_drop();
+        break;
+      }
+    }
+
+    utt->state = UtteranceState::COMPLETED;
+    const auto e2e_us = static_cast<std::uint64_t>(
+        to_micros(Clock::now() - utt->metrics.capture_start));
+    metrics_.record_stage_latency(StageId::kEndToEnd, e2e_us);
+
+    if (config_.telemetry.log_per_utterance) {
+      MEV_LOG_INFO("[METRICS] utterance_id=", utt->id,
+                   " total_ms=", utt->metrics.total_ms(),
+                   " asr_ms=", utt->metrics.asr_ms(),
+                   " tts_ms=", utt->metrics.tts_ms(),
+                   " state=COMPLETED");
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Thread 6 — Supervisor (watchdog + health reporting)
+// ---------------------------------------------------------------------------
+void PipelineOrchestrator::supervisor_loop(std::stop_token token) {
+  using Ms = std::chrono::milliseconds;
+  const auto report_interval   = Ms(static_cast<int>(config_.telemetry.report_interval_ms));
+  const auto watchdog_interval = Ms(500);
+  auto next_report   = std::chrono::steady_clock::now() + report_interval;
+  auto next_watchdog = std::chrono::steady_clock::now() + watchdog_interval;
+
+  while (!token.stop_requested()) {
+    std::this_thread::sleep_for(Ms(100));
+    const auto now = std::chrono::steady_clock::now();
+
+    // ---- Latency watchdog -----------------------------------------------
+    if (now >= next_watchdog) {
+      next_watchdog = now + watchdog_interval;
+      const auto total_q = ingest_to_asr_->size_approx() + text_to_tts_->size_approx();
+      const auto est_ms  = static_cast<std::uint32_t>(total_q * config_.asr.chunk_ms);
+
+      if (est_ms > config_.pipeline.critical_threshold_ms) {
+        MEV_LOG_ERROR("[WATCHDOG] critical latency est=", est_ms, "ms — backlog too deep");
+        metrics_.inc_degradation_event();
+        // TODO(v2): TtsScheduler::flush_all_as_stale() for hard flush
+      } else if (est_ms > config_.pipeline.warning_threshold_ms) {
+        MEV_LOG_WARN("[WATCHDOG] latency warning est=", est_ms, "ms");
+      }
+    }
+
+    // ---- Periodic health report -----------------------------------------
+    if (now >= next_report) {
+      next_report = now + report_interval;
+      if (state() != PipelineState::kRunning) continue;
+
+      const auto snap = metrics_.snapshot();
+      const char* mode_str = [&]() -> const char* {
+        switch (mode_.load(std::memory_order_relaxed)) {
+          case PipelineMode::NORMAL:      return "NORMAL";
+          case PipelineMode::DEGRADED:    return "DEGRADED";
+          case PipelineMode::MINIMAL:     return "MINIMAL";
+          case PipelineMode::PASSTHROUGH: return "PASSTHROUGH";
+        }
+        return "?";
+      }();
+
+      MEV_LOG_INFO("[HEALTH] mode=", mode_str,
+                   " asr_q=", ingest_to_asr_->size_approx(),
+                   " tts_q=", text_to_tts_->size_approx(),
+                   " overruns=", snap.input_overruns,
+                   " underruns=", snap.output_underruns,
+                   " drops=", snap.queue_drops,
+                   " stale=", snap.stale_cancelled,
+                   " asr=", snap.asr_requests,
+                   " tts=", snap.tts_requests,
+                   " gpu_fallbacks=", snap.gpu_contention_fallbacks,
+                   " degradations=", snap.degradation_events);
+    }
+  }
+}
+
+}  // namespace mev

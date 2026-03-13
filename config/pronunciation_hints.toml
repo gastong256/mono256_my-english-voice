@@ -1,0 +1,29 @@
+# =============================================================================
+# Pronunciation hints override file.
+#
+# Loaded by TechnicalDomainAdapter::initialize() when
+# [tts.pronunciation_hints] enabled = true and hints_path points here.
+#
+# These override the built-in defaults in load_default_pronunciation().
+# Format: "term" = "how to say it"
+# =============================================================================
+
+[hints]
+"kubectl"       = "kube control"
+"nginx"         = "engine X"
+"PostgreSQL"    = "post gres Q L"
+"CI/CD"         = "C I C D"
+"async"         = "ay-sync"
+"k8s"           = "kubernetes"
+"SLO"           = "S L O"
+"SLA"           = "S L A"
+"gRPC"          = "G R P C"
+"OAuth"         = "O Auth"
+"DevOps"        = "dev ops"
+"IaC"           = "infrastructure as code"
+"YAML"          = "yamel"
+"FastAPI"       = "fast A P I"
+"RabbitMQ"      = "rabbit M Q"
+"Elasticsearch" = "elastic search"
+"NoSQL"         = "no S Q L"
+"MySQL"         = "my S Q L"

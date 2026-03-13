@@ -1,0 +1,20 @@
+function(add_mev_test name)
+  add_executable(${name} ${ARGN})
+  target_link_libraries(${name} PRIVATE mev)
+  mev_set_warnings(${name})
+  mev_enable_sanitizers(${name})
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+# Existing tests
+add_mev_test(test_spsc_ring        test_spsc_ring.cpp)
+add_mev_test(test_chunk_committer  test_chunk_committer.cpp)
+add_mev_test(test_domain_adapter   test_domain_adapter.cpp)
+add_mev_test(test_pipeline_wiring  test_pipeline_wiring.cpp)
+
+# New tests added in refactor
+add_mev_test(test_utterance_lifecycle  test_utterance_lifecycle.cpp)
+add_mev_test(test_tts_scheduler_policy test_tts_scheduler_policy.cpp)
+add_mev_test(test_domain_corrections   test_domain_corrections.cpp)
+add_mev_test(test_gpu_scheduler        test_gpu_scheduler.cpp)
+add_mev_test(test_pipeline_shutdown    test_pipeline_shutdown.cpp)

@@ -1,0 +1,25 @@
+#pragma once
+
+#include <atomic>
+#include <string>
+#include <vector>
+
+#include "mev/asr/i_asr_engine.hpp"
+
+namespace mev {
+
+class WhisperAsrStub final : public IASREngine {
+ public:
+  WhisperAsrStub(std::string model_path, bool enable_gpu);
+
+  bool warmup(std::string& error) override;
+  [[nodiscard]] AsrPartialHypothesis transcribe_incremental(const AsrRequest& request) override;
+  [[nodiscard]] std::string name() const override { return "whisper.cpp_stub"; }
+
+ private:
+  std::string model_path_;
+  bool enable_gpu_;
+  std::atomic<std::uint64_t> counter_{0};
+};
+
+}  // namespace mev

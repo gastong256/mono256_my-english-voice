@@ -39,3 +39,20 @@
 
 # debug information files
 *.dwo
+
+# Build outputs
+build/
+
+# Claude Code session data (local only)
+.claude/
+
+# Downloaded model weights (can be large; re-download with scripts in README)
+models/
+
+# Runtime logs
+logs/
+
+# Editor / IDE
+.vscode/
+*.swp
+*~

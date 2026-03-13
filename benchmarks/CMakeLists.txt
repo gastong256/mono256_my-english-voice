@@ -1,0 +1,7 @@
+add_executable(benchmark_queue queue_benchmark.cpp)
+target_link_libraries(benchmark_queue PRIVATE mev)
+mev_set_warnings(benchmark_queue)
+
+add_executable(benchmark_pipeline_latency pipeline_latency_sim.cpp)
+target_link_libraries(benchmark_pipeline_latency PRIVATE mev)
+mev_set_warnings(benchmark_pipeline_latency)

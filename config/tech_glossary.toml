@@ -1,0 +1,94 @@
+# =============================================================================
+# Technical Domain Glossary
+#
+# [corrections]   — ASR post-processing: what Whisper may produce → correct term
+# [pronunciation] — TTS pre-processing: term → how to pronounce it
+# [domain_terms]  — Terms included in Whisper initial_prompt for domain biasing
+# [frequent_phrases] — Common interview phrases (reserved for future prompting)
+# =============================================================================
+
+[corrections]
+# Common Whisper mis-transcriptions for Spanish-accented English tech speech.
+# Keys are lowercased for case-insensitive matching.
+"post-grass"        = "PostgreSQL"
+"post grass"        = "PostgreSQL"
+"post gray sql"     = "PostgreSQL"
+"postgres"          = "PostgreSQL"
+"cube ctl"          = "kubectl"
+"cube cuddle"       = "kubectl"
+"cube control"      = "kubectl"
+"kube ctl"          = "kubectl"
+"doctor"            = "Docker"
+"terra farm"        = "Terraform"
+"terra form"        = "Terraform"
+"fast api"          = "FastAPI"
+"read is"           = "Redis"
+"red is"            = "Redis"
+"cube ernet ease"   = "Kubernetes"
+"cube net ease"     = "Kubernetes"
+"kubernetes ease"   = "Kubernetes"
+"engine x"          = "nginx"
+"engine ex"         = "nginx"
+"jay son"           = "JSON"
+"ci cd"             = "CI/CD"
+"ci slash cd"       = "CI/CD"
+"s l o"             = "SLO"
+"s l a"             = "SLA"
+"my sequel"         = "MySQL"
+"elastic search"    = "Elasticsearch"
+"rabbit mq"         = "RabbitMQ"
+"rabbit queue"      = "RabbitMQ"
+"kafka"             = "Kafka"
+
+[pronunciation]
+# Pronunciation hints applied pre-TTS to make synthesized speech natural.
+# Term (as it appears after ASR correction) → how TTS should speak it.
+"kubectl"       = "kube control"
+"nginx"         = "engine X"
+"PostgreSQL"    = "post gres Q L"
+"CI/CD"         = "C I C D"
+"async"         = "ay-sync"
+"k8s"           = "kubernetes"
+"SLO"           = "S L O"
+"SLA"           = "S L A"
+"gRPC"          = "G R P C"
+"OAuth"         = "O Auth"
+"DevOps"        = "dev ops"
+"IaC"           = "infrastructure as code"
+"YAML"          = "yamel"
+"FastAPI"       = "fast A P I"
+"RabbitMQ"      = "rabbit M Q"
+"Elasticsearch" = "elastic search"
+"MySQL"         = "my S Q L"
+"NoSQL"         = "no S Q L"
+
+[domain_terms]
+# These terms are concatenated into the Whisper initial_prompt string to bias
+# the model towards recognising technical vocabulary.
+terms = [
+    "Kubernetes", "PostgreSQL", "Redis", "FastAPI", "Docker",
+    "Terraform", "CI/CD", "observability", "tracing", "rate limiting",
+    "idempotency", "event-driven", "async", "throughput", "latency",
+    "SLO", "SLA", "pipeline", "deployment", "production-ready",
+    "microservices", "gRPC", "OAuth", "DevOps", "infrastructure as code",
+    "kubectl", "nginx", "horizontal scaling", "load balancer",
+    "message queue", "dead letter queue", "circuit breaker",
+    "retry policy", "backpressure", "sharding", "replication",
+    "Kafka", "RabbitMQ", "Elasticsearch", "MySQL", "MongoDB",
+    "YAML", "JSON", "REST", "GraphQL", "WebSocket",
+]
+
+[frequent_phrases]
+# Common phrases in technical interviews — reserved for future prompt engineering.
+phrases = [
+    "in my experience",
+    "the trade-off here is",
+    "from a scalability perspective",
+    "in terms of performance",
+    "the way I would approach this",
+    "let me walk you through",
+    "the architecture looks like",
+    "we can optimize this by",
+    "the bottleneck here is",
+    "let's think about the failure modes",
+]
