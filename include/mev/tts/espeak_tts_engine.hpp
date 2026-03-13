@@ -31,7 +31,7 @@ class EspeakTTSEngine final : public ITTSEngine {
 
  private:
   bool initialized_{false};
-  // TODO(espeak): espeak_VOICE* voice_handle_{nullptr};
+  int sample_rate_{22050};
 };
 
 }  // namespace mev

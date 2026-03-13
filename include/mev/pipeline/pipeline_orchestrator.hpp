@@ -10,6 +10,8 @@
 #include "mev/audio/audio_types.hpp"
 #include "mev/audio/i_audio_input.hpp"
 #include "mev/audio/i_audio_output.hpp"
+#include "mev/audio/i_vad_engine.hpp"
+#include "mev/audio/resampler.hpp"
 #include "mev/config/app_config.hpp"
 #include "mev/core/spsc_ring_buffer.hpp"
 #include "mev/core/utterance.hpp"
@@ -144,6 +146,9 @@ class PipelineOrchestrator final : public IPipelineOrchestrator {
   std::shared_ptr<class DomainContextManager> domain_context_;
   std::unique_ptr<IDomainAdapter> domain_adapter_;
   std::unique_ptr<TtsScheduler>   tts_scheduler_;
+  std::unique_ptr<IVadEngine>   vad_engine_;
+  std::unique_ptr<Resampler>    ingest_resampler_;   // mic_rate → 16kHz
+  std::unique_ptr<Resampler>    tts_resampler_;      // tts_rate → output_rate
 
   // ---- Worker threads ---------------------------------------------------
   std::jthread ingest_thread_;      // Thread 2

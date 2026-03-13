@@ -1,62 +1,16 @@
 #include "mev/config/app_config.hpp"
 
-#include <algorithm>
-#include <cctype>
-#include <fstream>
+#include <filesystem>
 #include <sstream>
-#include <unordered_map>
+
+#include "mev/core/logger.hpp"
+
+#define TOML_EXCEPTIONS 1
+#include <toml++/toml.hpp>
 
 namespace mev {
+
 namespace {
-
-std::string trim(const std::string& input) {
-  auto begin = input.begin();
-  while (begin != input.end() && std::isspace(static_cast<unsigned char>(*begin)) != 0) {
-    ++begin;
-  }
-  auto end = input.end();
-  while (end != begin && std::isspace(static_cast<unsigned char>(*(end - 1))) != 0) {
-    --end;
-  }
-  return std::string(begin, end);
-}
-
-bool parse_bool(const std::string& value, bool& out) {
-  if (value == "true" || value == "1" || value == "yes" || value == "on") {
-    out = true;
-    return true;
-  }
-  if (value == "false" || value == "0" || value == "no" || value == "off") {
-    out = false;
-    return true;
-  }
-  return false;
-}
-
-template <typename T>
-bool parse_number(const std::string& value, T& out) {
-  std::istringstream iss(value);
-  T parsed{};
-  iss >> parsed;
-  if (iss.fail()) {
-    return false;
-  }
-  out = parsed;
-  return true;
-}
-
-std::vector<std::string> parse_csv_list(const std::string& value) {
-  std::vector<std::string> out;
-  std::stringstream ss(value);
-  std::string item;
-  while (std::getline(ss, item, ',')) {
-    const auto token = trim(item);
-    if (!token.empty()) {
-      out.push_back(token);
-    }
-  }
-  return out;
-}
 
 LogLevel parse_log_level(const std::string& value) {
   if (value == "error") return LogLevel::kError;
@@ -68,7 +22,7 @@ LogLevel parse_log_level(const std::string& value) {
 DropPolicy parse_drop_policy(const std::string& value) {
   if (value == "coalesce") return DropPolicy::kCoalesce;
   if (value == "none")     return DropPolicy::kNone;
-  return DropPolicy::kDropOldest;  // default
+  return DropPolicy::kDropOldest;
 }
 
 }  // namespace
@@ -76,151 +30,257 @@ DropPolicy parse_drop_policy(const std::string& value) {
 AppConfig default_config() { return AppConfig{}; }
 
 bool load_config_from_file(const std::string& path, AppConfig& config, std::string& error) {
-  std::ifstream file(path);
-  if (!file.good()) {
-    error = "cannot open config: " + path;
+  toml::table tbl;
+  try {
+    tbl = toml::parse_file(path);
+  } catch (const toml::parse_error& e) {
+    std::ostringstream oss;
+    oss << "TOML parse error in '" << path << "': " << e.description()
+        << " (line " << e.source().begin.line << ")";
+    error = oss.str();
+    return false;
+  } catch (const std::exception& e) {
+    error = std::string("failed to open config '") + path + "': " + e.what();
     return false;
   }
 
-  std::string section;
-  std::string line;
-  std::size_t line_num = 0;
-
-  while (std::getline(file, line)) {
-    ++line_num;
-    const auto clean = trim(line);
-    if (clean.empty() || clean[0] == '#' || clean[0] == ';') continue;
-
-    if (clean.front() == '[' && clean.back() == ']') {
-      section = trim(clean.substr(1, clean.size() - 2));
-      continue;
+  // ---- [audio] ------------------------------------------------------------
+  if (const auto* audio = tbl["audio"].as_table()) {
+    config.audio.input_device  = audio->get_as<std::string>("input_device")
+                                     ? audio->at("input_device").value_or(config.audio.input_device)
+                                     : config.audio.input_device;
+    config.audio.output_device = audio->get_as<std::string>("output_device")
+                                     ? audio->at("output_device").value_or(config.audio.output_device)
+                                     : config.audio.output_device;
+    // The TOML file uses "sample_rate" and "frame_size"; also accept the longer names.
+    if (const auto v = (*audio)["sample_rate"].value<int64_t>()) {
+      config.audio.sample_rate_hz = static_cast<std::uint32_t>(*v);
+    } else if (const auto v2 = (*audio)["sample_rate_hz"].value<int64_t>()) {
+      config.audio.sample_rate_hz = static_cast<std::uint32_t>(*v2);
     }
-
-    const auto eq_pos = clean.find('=');
-    if (eq_pos == std::string::npos) {
-      error = "invalid line " + std::to_string(line_num) + ": " + clean;
-      return false;
+    if (const auto v = (*audio)["frame_size"].value<int64_t>()) {
+      config.audio.frames_per_buffer = static_cast<std::uint32_t>(*v);
+    } else if (const auto v2 = (*audio)["frames_per_buffer"].value<int64_t>()) {
+      config.audio.frames_per_buffer = static_cast<std::uint32_t>(*v2);
     }
-
-    const auto key   = trim(clean.substr(0, eq_pos));
-    const auto value = trim(clean.substr(eq_pos + 1));
-
-    // ---- [audio] --------------------------------------------------------
-    if (section == "audio") {
-      if      (key == "input_device")       config.audio.input_device = value;
-      else if (key == "output_device")      config.audio.output_device = value;
-      else if (key == "sample_rate_hz")     parse_number(value, config.audio.sample_rate_hz);
-      else if (key == "frames_per_buffer")  parse_number(value, config.audio.frames_per_buffer);
-      else if (key == "input_channels")     parse_number(value, config.audio.input_channels);
-      else if (key == "output_channels")    parse_number(value, config.audio.output_channels);
-      else if (key == "input_device_id")    parse_number(value, config.audio.input_device_id);
-      else if (key == "output_device_id")   parse_number(value, config.audio.output_device_id);
-      else if (key == "input_ring_capacity") parse_number(value, config.audio.input_ring_capacity);
-      else if (key == "output_ring_capacity") parse_number(value, config.audio.output_ring_capacity);
-
-    // ---- [vad] ----------------------------------------------------------
-    } else if (section == "vad") {
-      if      (key == "engine")                config.vad.engine = value;
-      else if (key == "threshold")             parse_number(value, config.vad.threshold);
-      else if (key == "silence_duration_ms")   parse_number(value, config.vad.silence_duration_ms);
-      else if (key == "max_chunk_duration_ms") parse_number(value, config.vad.max_chunk_duration_ms);
-      else if (key == "leading_pad_ms")        parse_number(value, config.vad.leading_pad_ms);
-      else if (key == "trailing_pad_ms")       parse_number(value, config.vad.trailing_pad_ms);
-
-    // ---- [asr] ----------------------------------------------------------
-    } else if (section == "asr") {
-      if      (key == "engine")             config.asr.engine = value;
-      else if (key == "model_path")         config.asr.model_path = value;
-      else if (key == "language")           config.asr.language = value;
-      else if (key == "translate")          parse_bool(value, config.asr.translate);
-      else if (key == "beam_size")          parse_number(value, config.asr.beam_size);
-      else if (key == "enable_gpu")         parse_bool(value, config.asr.enable_gpu);
-      else if (key == "gpu_enabled")        parse_bool(value, config.asr.enable_gpu);
-      else if (key == "quantization")       config.asr.quantization = value;
-      else if (key == "use_domain_prompt")  parse_bool(value, config.asr.use_domain_prompt);
-      else if (key == "max_context_tokens") parse_number(value, config.asr.max_context_tokens);
-      else if (key == "chunk_ms")           parse_number(value, config.asr.chunk_ms);
-      else if (key == "hop_ms")             parse_number(value, config.asr.hop_ms);
-      else if (key == "stability_threshold") parse_number(value, config.asr.stability_threshold);
-      else if (key == "force_commit_ms")    parse_number(value, config.asr.force_commit_ms);
-      // Legacy alias
-      else if (key == "backend")            config.asr.engine = value;
-
-    // ---- [tts] ----------------------------------------------------------
-    } else if (section == "tts") {
-      if      (key == "engine")                    config.tts.engine = value;
-      else if (key == "backend")                   config.tts.engine = value;  // legacy alias
-      else if (key == "model_path")                config.tts.model_path = value;
-      else if (key == "piper_data_path")           config.tts.piper_data_path = value;
-      else if (key == "speaker_id")                parse_number(value, config.tts.speaker_id);
-      else if (key == "enable_gpu")                parse_bool(value, config.tts.enable_gpu);
-      else if (key == "gpu_enabled")               parse_bool(value, config.tts.enable_gpu);
-      else if (key == "output_sample_rate")        parse_number(value, config.tts.output_sample_rate);
-      else if (key == "fallback_engine")           config.tts.fallback_engine = value;
-      else if (key == "pronunciation_hints_enabled") parse_bool(value, config.tts.pronunciation_hints_enabled);
-      else if (key == "hints_path")                config.tts.hints_path = value;
-      else if (key == "speaker_reference")         config.tts.speaker_reference = value;
-
-    // ---- [queues] -------------------------------------------------------
-    } else if (section == "queues") {
-      if      (key == "ingest_to_asr_capacity")  parse_number(value, config.queues.ingest_to_asr_capacity);
-      else if (key == "asr_to_text_capacity")    parse_number(value, config.queues.asr_to_text_capacity);
-      else if (key == "text_to_tts_capacity")    parse_number(value, config.queues.text_to_tts_capacity);
-      // Legacy aliases
-      else if (key == "asr_to_commit_capacity")  parse_number(value, config.queues.asr_to_commit_capacity);
-      else if (key == "commit_to_tts_capacity")  parse_number(value, config.queues.commit_to_tts_capacity);
-
-    // ---- [pipeline] -----------------------------------------------------
-    } else if (section == "pipeline") {
-      if      (key == "max_queue_depth")       parse_number(value, config.pipeline.max_queue_depth);
-      else if (key == "drop_policy")           config.pipeline.drop_policy = parse_drop_policy(value);
-      else if (key == "max_latency_ms")        parse_number(value, config.pipeline.max_latency_ms);
-      else if (key == "warning_threshold_ms")  parse_number(value, config.pipeline.warning_threshold_ms);
-      else if (key == "critical_threshold_ms") parse_number(value, config.pipeline.critical_threshold_ms);
-      else if (key == "stale_after_n_newer")   parse_number(value, config.pipeline.stale_after_n_newer);
-      else if (key == "stale_after_ms")        parse_number(value, config.pipeline.stale_after_ms);
-
-    // ---- [gpu] ----------------------------------------------------------
-    } else if (section == "gpu") {
-      if      (key == "enabled")                         parse_bool(value, config.gpu.enabled);
-      else if (key == "device_id")                       parse_number(value, config.gpu.device_id);
-      else if (key == "asr_priority")                    parse_bool(value, config.gpu.asr_priority);
-      else if (key == "tts_cpu_fallback_on_contention")  parse_bool(value, config.gpu.tts_cpu_fallback_on_contention);
-
-    // ---- [domain] -------------------------------------------------------
-    } else if (section == "domain") {
-      if      (key == "glossary_path")             config.domain.glossary_path = value;
-      else if (key == "session_terms_enabled")     parse_bool(value, config.domain.session_terms_enabled);
-      else if (key == "pronunciation_hints")       parse_bool(value, config.domain.pronunciation_hints);
-      else if (key == "initial_prompt_template")   config.domain.initial_prompt_template = value;
-      else if (key == "technical_glossary")        config.domain.technical_glossary = parse_csv_list(value);
-      else if (key == "frequent_phrases")          config.domain.frequent_phrases = parse_csv_list(value);
-      else if (key == "session_terms_limit")       parse_number(value, config.domain.session_terms_limit);
-
-    // ---- [resilience] ---------------------------------------------------
-    } else if (section == "resilience") {
-      if      (key == "enable_degradation")          parse_bool(value, config.resilience.enable_degradation);
-      else if (key == "gpu_failure_action")          config.resilience.gpu_failure_action = value;
-      else if (key == "passthrough_on_total_failure") parse_bool(value, config.resilience.passthrough_on_total_failure);
-
-    // ---- [logging] ------------------------------------------------------
-    } else if (section == "logging") {
-      if      (key == "level")   config.logging.level = parse_log_level(value);
-      else if (key == "file")    config.logging.file = value;
-      else if (key == "console") parse_bool(value, config.logging.console);
-      else if (key == "async")   parse_bool(value, config.logging.async);
-
-    // ---- [telemetry] ----------------------------------------------------
-    } else if (section == "telemetry") {
-      if      (key == "enabled")              parse_bool(value, config.telemetry.enabled);
-      else if (key == "report_interval_ms")   parse_number(value, config.telemetry.report_interval_ms);
-      else if (key == "log_per_utterance")    parse_bool(value, config.telemetry.log_per_utterance);
-
-    // ---- [runtime] (internal, not in TOML template) --------------------
-    } else if (section == "runtime") {
-      if      (key == "use_simulated_audio")   parse_bool(value, config.runtime.use_simulated_audio);
-      else if (key == "run_duration_seconds")  parse_number(value, config.runtime.run_duration_seconds);
+    if (const auto v = (*audio)["channels"].value<int64_t>()) {
+      config.audio.input_channels  = static_cast<std::uint16_t>(*v);
+      config.audio.output_channels = static_cast<std::uint16_t>(*v);
     }
+    if (const auto v = (*audio)["input_channels"].value<int64_t>()) {
+      config.audio.input_channels = static_cast<std::uint16_t>(*v);
+    }
+    if (const auto v = (*audio)["output_channels"].value<int64_t>()) {
+      config.audio.output_channels = static_cast<std::uint16_t>(*v);
+    }
+    if (const auto v = (*audio)["input_ring_capacity"].value<int64_t>()) {
+      config.audio.input_ring_capacity = static_cast<std::size_t>(*v);
+    }
+    if (const auto v = (*audio)["output_ring_capacity"].value<int64_t>()) {
+      config.audio.output_ring_capacity = static_cast<std::size_t>(*v);
+    }
+  }
+
+  // ---- [vad] --------------------------------------------------------------
+  if (const auto* vad = tbl["vad"].as_table()) {
+    config.vad.engine               = (*vad)["engine"].value_or(config.vad.engine);
+    config.vad.threshold            = (*vad)["threshold"].value_or(config.vad.threshold);
+    if (const auto v = (*vad)["silence_duration_ms"].value<int64_t>()) {
+      config.vad.silence_duration_ms = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*vad)["max_chunk_duration_ms"].value<int64_t>()) {
+      config.vad.max_chunk_duration_ms = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*vad)["leading_pad_ms"].value<int64_t>()) {
+      config.vad.leading_pad_ms = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*vad)["trailing_pad_ms"].value<int64_t>()) {
+      config.vad.trailing_pad_ms = static_cast<std::uint32_t>(*v);
+    }
+  }
+
+  // ---- [asr] --------------------------------------------------------------
+  if (const auto* asr = tbl["asr"].as_table()) {
+    config.asr.engine           = (*asr)["engine"].value_or(config.asr.engine);
+    config.asr.model_path       = (*asr)["model_path"].value_or(config.asr.model_path);
+    config.asr.language         = (*asr)["language"].value_or(config.asr.language);
+    config.asr.translate        = (*asr)["translate"].value_or(config.asr.translate);
+    config.asr.enable_gpu       = (*asr)["gpu_enabled"].value_or(
+                                  (*asr)["enable_gpu"].value_or(config.asr.enable_gpu));
+    config.asr.quantization     = (*asr)["quantization"].value_or(config.asr.quantization);
+    config.asr.use_domain_prompt = (*asr)["use_domain_prompt"].value_or(config.asr.use_domain_prompt);
+    if (const auto v = (*asr)["beam_size"].value<int64_t>()) {
+      config.asr.beam_size = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*asr)["max_context_tokens"].value<int64_t>()) {
+      config.asr.max_context_tokens = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*asr)["chunk_ms"].value<int64_t>()) {
+      config.asr.chunk_ms = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*asr)["hop_ms"].value<int64_t>()) {
+      config.asr.hop_ms = static_cast<std::uint32_t>(*v);
+    }
+    config.asr.stability_threshold = (*asr)["stability_threshold"].value_or(
+        config.asr.stability_threshold);
+    if (const auto v = (*asr)["force_commit_ms"].value<int64_t>()) {
+      config.asr.force_commit_ms = static_cast<std::uint32_t>(*v);
+    }
+  }
+
+  // ---- [tts] --------------------------------------------------------------
+  if (const auto* tts = tbl["tts"].as_table()) {
+    config.tts.engine            = (*tts)["engine"].value_or(config.tts.engine);
+    config.tts.model_path        = (*tts)["model_path"].value_or(config.tts.model_path);
+    config.tts.piper_data_path   = (*tts)["piper_data_path"].value_or(config.tts.piper_data_path);
+    config.tts.enable_gpu        = (*tts)["gpu_enabled"].value_or(
+                                   (*tts)["enable_gpu"].value_or(config.tts.enable_gpu));
+    config.tts.fallback_engine   = (*tts)["fallback_engine"].value_or(config.tts.fallback_engine);
+    if (const auto v = (*tts)["speaker_id"].value<int64_t>()) {
+      config.tts.speaker_id = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*tts)["output_sample_rate"].value<int64_t>()) {
+      config.tts.output_sample_rate = static_cast<std::uint32_t>(*v);
+    }
+    // Sub-table [tts.pronunciation_hints]
+    if (const auto* hints = (*tts)["pronunciation_hints"].as_table()) {
+      config.tts.pronunciation_hints_enabled =
+          (*hints)["enabled"].value_or(config.tts.pronunciation_hints_enabled);
+      config.tts.hints_path =
+          (*hints)["hints_path"].value_or(config.tts.hints_path);
+    }
+  }
+
+  // ---- [queues] -----------------------------------------------------------
+  if (const auto* q = tbl["queues"].as_table()) {
+    if (const auto v = (*q)["ingest_to_asr_capacity"].value<int64_t>()) {
+      config.queues.ingest_to_asr_capacity = static_cast<std::size_t>(*v);
+    }
+    if (const auto v = (*q)["asr_to_text_capacity"].value<int64_t>()) {
+      config.queues.asr_to_text_capacity = static_cast<std::size_t>(*v);
+    }
+    if (const auto v = (*q)["text_to_tts_capacity"].value<int64_t>()) {
+      config.queues.text_to_tts_capacity = static_cast<std::size_t>(*v);
+    }
+  }
+
+  // ---- [pipeline] ---------------------------------------------------------
+  if (const auto* pl = tbl["pipeline"].as_table()) {
+    if (const auto v = (*pl)["max_queue_depth"].value<int64_t>()) {
+      config.pipeline.max_queue_depth = static_cast<std::size_t>(*v);
+    }
+    const auto drop_str = (*pl)["drop_policy"].value_or(std::string{});
+    if (!drop_str.empty()) {
+      config.pipeline.drop_policy = parse_drop_policy(drop_str);
+    }
+    if (const auto v = (*pl)["max_latency_ms"].value<int64_t>()) {
+      config.pipeline.max_latency_ms = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*pl)["warning_threshold_ms"].value<int64_t>()) {
+      config.pipeline.warning_threshold_ms = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*pl)["critical_threshold_ms"].value<int64_t>()) {
+      config.pipeline.critical_threshold_ms = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*pl)["stale_after_n_newer"].value<int64_t>()) {
+      config.pipeline.stale_after_n_newer = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*pl)["stale_after_ms"].value<int64_t>()) {
+      config.pipeline.stale_after_ms = static_cast<std::uint32_t>(*v);
+    }
+  }
+
+  // ---- [gpu] --------------------------------------------------------------
+  if (const auto* gpu = tbl["gpu"].as_table()) {
+    config.gpu.enabled                        = (*gpu)["enabled"].value_or(config.gpu.enabled);
+    config.gpu.asr_priority                   = (*gpu)["asr_priority"].value_or(config.gpu.asr_priority);
+    config.gpu.tts_cpu_fallback_on_contention =
+        (*gpu)["tts_cpu_fallback_on_contention"].value_or(config.gpu.tts_cpu_fallback_on_contention);
+    if (const auto v = (*gpu)["device_id"].value<int64_t>()) {
+      config.gpu.device_id = static_cast<int>(*v);
+    }
+  }
+
+  // ---- [domain] -----------------------------------------------------------
+  if (const auto* dom = tbl["domain"].as_table()) {
+    config.domain.glossary_path           = (*dom)["glossary_path"].value_or(config.domain.glossary_path);
+    config.domain.session_terms_enabled   = (*dom)["session_terms_enabled"].value_or(
+                                              config.domain.session_terms_enabled);
+    config.domain.pronunciation_hints     = (*dom)["pronunciation_hints"].value_or(
+                                              config.domain.pronunciation_hints);
+    config.domain.initial_prompt_template = (*dom)["initial_prompt_template"].value_or(
+                                              config.domain.initial_prompt_template);
+    if (const auto v = (*dom)["session_terms_limit"].value<int64_t>()) {
+      config.domain.session_terms_limit = static_cast<std::size_t>(*v);
+    }
+    // Parse domain term lists.
+    if (const auto* arr = (*dom)["technical_glossary"].as_array()) {
+      config.domain.technical_glossary.clear();
+      arr->for_each([&](const auto& el) {
+        if (const auto* s = el.as_string()) {
+          config.domain.technical_glossary.push_back(s->get());
+        }
+      });
+    }
+    if (const auto* arr = (*dom)["frequent_phrases"].as_array()) {
+      config.domain.frequent_phrases.clear();
+      arr->for_each([&](const auto& el) {
+        if (const auto* s = el.as_string()) {
+          config.domain.frequent_phrases.push_back(s->get());
+        }
+      });
+    }
+  }
+
+  // ---- [resilience] -------------------------------------------------------
+  if (const auto* res = tbl["resilience"].as_table()) {
+    config.resilience.enable_degradation        =
+        (*res)["enable_degradation"].value_or(config.resilience.enable_degradation);
+    config.resilience.gpu_failure_action        =
+        (*res)["gpu_failure_action"].value_or(config.resilience.gpu_failure_action);
+    config.resilience.passthrough_on_total_failure =
+        (*res)["passthrough_on_total_failure"].value_or(
+            config.resilience.passthrough_on_total_failure);
+  }
+
+  // ---- [logging] ----------------------------------------------------------
+  if (const auto* log = tbl["logging"].as_table()) {
+    const auto lvl_str = (*log)["level"].value_or(std::string{});
+    if (!lvl_str.empty()) {
+      config.logging.level = parse_log_level(lvl_str);
+    }
+    config.logging.file    = (*log)["file"].value_or(config.logging.file);
+    config.logging.console = (*log)["console"].value_or(config.logging.console);
+    config.logging.async   = (*log)["async"].value_or(config.logging.async);
+  }
+
+  // ---- [telemetry] --------------------------------------------------------
+  if (const auto* tel = tbl["telemetry"].as_table()) {
+    config.telemetry.enabled           = (*tel)["enabled"].value_or(config.telemetry.enabled);
+    config.telemetry.log_per_utterance = (*tel)["log_per_utterance"].value_or(
+                                           config.telemetry.log_per_utterance);
+    if (const auto v = (*tel)["report_interval_ms"].value<int64_t>()) {
+      config.telemetry.report_interval_ms = static_cast<std::uint32_t>(*v);
+    }
+  }
+
+  // ---- [runtime] ----------------------------------------------------------
+  if (const auto* rt = tbl["runtime"].as_table()) {
+    config.runtime.use_simulated_audio  = (*rt)["use_simulated_audio"].value_or(
+                                            config.runtime.use_simulated_audio);
+    if (const auto v = (*rt)["run_duration_seconds"].value<int64_t>()) {
+      config.runtime.run_duration_seconds = static_cast<std::uint32_t>(*v);
+    }
+  }
+
+  // ---- Post-load warnings -------------------------------------------------
+  if (!config.asr.model_path.empty() &&
+      !std::filesystem::exists(config.asr.model_path)) {
+    MEV_LOG_WARN("config: asr.model_path not found: '", config.asr.model_path, "'");
+  }
+  if (!config.tts.model_path.empty() &&
+      !std::filesystem::exists(config.tts.model_path)) {
+    MEV_LOG_WARN("config: tts.model_path not found: '", config.tts.model_path, "'");
   }
 
   return validate_config(config, error);
@@ -240,6 +300,11 @@ bool validate_config(const AppConfig& config, std::string& error) {
 
   if (config.asr.stability_threshold < 0.0F || config.asr.stability_threshold > 1.0F) {
     error = "asr.stability_threshold must be in [0,1]";
+    return false;
+  }
+
+  if (config.vad.threshold < 0.0F || config.vad.threshold > 1.0F) {
+    error = "vad.threshold must be in [0,1]";
     return false;
   }
 

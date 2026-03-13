@@ -7,8 +7,11 @@
 #include <thread>
 
 #include "mev/asr/whisper_asr_stub.hpp"
+#include "mev/audio/null_vad_engine.hpp"
+#include "mev/audio/resampler.hpp"
 #include "mev/audio/simulated_audio_input.hpp"
 #include "mev/audio/simulated_audio_output.hpp"
+#include "mev/audio/webrtc_vad_engine.hpp"
 #include "mev/core/logger.hpp"
 #include "mev/core/profiling.hpp"
 #include "mev/domain/domain_context_manager.hpp"
@@ -17,6 +20,15 @@
 #include "mev/tts/espeak_tts_engine.hpp"
 #include "mev/tts/piper_tts_engine.hpp"
 #include "mev/tts/stub_tts_engine.hpp"
+
+#if defined(MEV_ENABLE_PORTAUDIO)
+#include "mev/audio/portaudio_input.hpp"
+#include "mev/audio/portaudio_output.hpp"
+#endif
+
+#if defined(MEV_ENABLE_WHISPER_CPP)
+#include "mev/asr/whisper_asr_engine.hpp"
+#endif
 
 // ---------------------------------------------------------------------------
 // Thread model (7 threads):
@@ -68,6 +80,13 @@ std::unique_ptr<ITTSEngine> make_tts_engine(const std::string& engine_name,
     return nullptr;
   }
   return engine;
+}
+
+// Convert float PCM samples to int16 for VAD processing.
+// Clamps to [-1, 1] range before scaling.
+inline int16_t float_to_int16(float v) {
+  v = (v < -1.0F) ? -1.0F : (v > 1.0F) ? 1.0F : v;
+  return static_cast<int16_t>(v * 32767.0F);
 }
 
 }  // namespace
@@ -165,19 +184,29 @@ bool PipelineOrchestrator::initialize_components() {
   text_to_tts_   = std::make_unique<SpscRingBuffer<std::unique_ptr<Utterance>>>(config_.pipeline.max_queue_depth + 2U);
   tts_to_output_ = std::make_unique<SpscRingBuffer<OutputAudioBlock>>(config_.audio.output_ring_capacity);
 
-  // TODO(next): replace with PortAudio/RtAudio; preserve RT-safe callbacks
-  // TODO: macOS support via BlackHole
-  // TODO: Windows support via VB-Cable
+  // Audio I/O — PortAudio when compiled in, simulated otherwise.
+#if defined(MEV_ENABLE_PORTAUDIO)
+  audio_input_  = std::make_unique<PortAudioInput>(
+      config_.audio.sample_rate_hz, config_.audio.input_channels,
+      config_.audio.frames_per_buffer, config_.audio.input_device);
+  audio_output_ = std::make_unique<PortAudioOutput>(
+      config_.audio.sample_rate_hz, config_.audio.output_channels,
+      config_.audio.frames_per_buffer, config_.audio.output_device);
+#else
   audio_input_  = std::make_unique<SimulatedAudioInput>(
       config_.audio.sample_rate_hz, config_.audio.input_channels, config_.audio.frames_per_buffer);
   audio_output_ = std::make_unique<SimulatedAudioOutput>(
       config_.audio.sample_rate_hz, config_.audio.output_channels, config_.audio.frames_per_buffer);
+#endif
 
-  // TODO(next): replace WhisperAsrStub with whisper.cpp wrapper
-  //   - translate mode (es→en), initial_prompt injection
-  //   - TODO(next): partial hypothesis support
+  // ASR — whisper.cpp when compiled in, stub otherwise.
+#if defined(MEV_ENABLE_WHISPER_CPP)
+  asr_engine_ = std::make_unique<WhisperASREngine>(config_.asr.model_path, config_.asr.enable_gpu);
+#else
   asr_engine_ = std::make_unique<WhisperAsrStub>(config_.asr.model_path, config_.asr.enable_gpu);
+#endif
 
+  // TTS engine selection.
   std::string tts_error;
   tts_engine_ = make_tts_engine(config_.tts.engine, config_.tts, tts_error);
   if (!tts_engine_) {
@@ -198,6 +227,7 @@ bool PipelineOrchestrator::initialize_components() {
     // Non-fatal: eSpeak may not be installed
   }
 
+  // Domain adapter.
   domain_context_ = std::make_shared<DomainContextManager>(config_.domain);
   domain_adapter_ = std::make_unique<TechnicalDomainAdapter>(domain_context_);
   std::string domain_err;
@@ -205,6 +235,7 @@ bool PipelineOrchestrator::initialize_components() {
     MEV_LOG_WARN("domain adapter init: ", domain_err);
   }
 
+  // TTS scheduler.
   tts_scheduler_ = std::make_unique<TtsScheduler>(TtsSchedulerPolicy{
       .max_queue_depth     = config_.pipeline.max_queue_depth,
       .backlog_soft_limit  = static_cast<std::size_t>(config_.pipeline.max_queue_depth / 2U),
@@ -212,6 +243,27 @@ bool PipelineOrchestrator::initialize_components() {
       .stale_after_n_newer = config_.pipeline.stale_after_n_newer,
       .drop_policy         = config_.pipeline.drop_policy,
   });
+
+  // VAD engine.
+#if defined(MEV_ENABLE_WEBRTCVAD)
+  vad_engine_ = std::make_unique<WebRtcVadEngine>();
+#else
+  vad_engine_ = std::make_unique<NullVadEngine>();
+#endif
+  vad_engine_->initialize(config_.vad);
+
+  // Resamplers.
+#if defined(MEV_ENABLE_LIBSAMPLERATE)
+  ingest_resampler_ = std::make_unique<Resampler>();
+  ingest_resampler_->initialize(
+      16000.0 / static_cast<double>(config_.audio.sample_rate_hz), 1);
+
+  tts_resampler_ = std::make_unique<Resampler>();
+  tts_resampler_->initialize(
+      static_cast<double>(config_.audio.sample_rate_hz) /
+      static_cast<double>(config_.tts.output_sample_rate),
+      1);
+#endif
 
   return true;
 }
@@ -234,7 +286,6 @@ bool PipelineOrchestrator::warmup_models() {
       std::chrono::steady_clock::now() - t0).count();
   MEV_LOG_INFO("warmup completed in ", ms, "ms — pipeline ready");
 
-  // NOTE: the ingest worker checks pipeline_ready_ before forwarding chunks.
   set_ready(true);
   return true;
 }
@@ -320,22 +371,51 @@ void PipelineOrchestrator::on_audio_output_callback(float* output, const std::si
 // Thread 2 — Ingest Worker
 // ---------------------------------------------------------------------------
 void PipelineOrchestrator::ingest_loop(std::stop_token token) {
+  // Pre-allocated resampling buffer (max possible 16kHz output for 1 block).
+  std::vector<float> resampled_mono;
+  resampled_mono.reserve(4096U);
+
+  // Pre-allocated VAD int16 buffer (30ms @ 16kHz = 480 samples).
+  std::vector<int16_t> vad_frame_int16;
+  vad_frame_int16.reserve(512U);
+
+  // Rolling mono PCM accumulator (may be at mic rate or 16kHz depending on resampler).
   std::vector<float> rolling_pcm;
   rolling_pcm.reserve(static_cast<std::size_t>(config_.audio.sample_rate_hz) * 4U);
 
-  std::size_t consumed_offset = 0;
+  // VAD state machine.
+  enum class VadState : std::uint8_t { SILENCE, SPEECH };
+  VadState vad_state = VadState::SILENCE;
+  std::vector<float> speech_buffer;
+  speech_buffer.reserve(static_cast<std::size_t>(config_.vad.max_chunk_duration_ms) *
+                        16000U / 1000U + 512U);
+
+  // How many 16kHz samples represent our VAD frame (use 30ms).
+  constexpr std::uint32_t kVadFrameMs = 30U;
+  const std::size_t vad_frame_samples = (16000U * kVadFrameMs) / 1000U;  // 480 samples @ 16kHz
+
+  // Silence threshold in samples.
+  const std::size_t silence_samples =
+      static_cast<std::size_t>(config_.vad.silence_duration_ms) * 16000U / 1000U;
+  const std::size_t max_chunk_samples =
+      static_cast<std::size_t>(config_.vad.max_chunk_duration_ms) * 16000U / 1000U;
+  const std::size_t leading_pad_samples =
+      static_cast<std::size_t>(config_.vad.leading_pad_ms) * 16000U / 1000U;
+
+  std::size_t silence_frame_count = 0;  // frames of silence seen while in SPEECH state
+
+  // Sliding pre-speech buffer for leading pad.
+  std::vector<float> pre_speech_ring;
+  pre_speech_ring.reserve(leading_pad_samples + vad_frame_samples);
+
+  // Legacy fixed-window params (fallback when VAD engine is NullVadEngine).
   const auto chunk_samples = (static_cast<std::uint64_t>(config_.asr.chunk_ms) *
                                config_.audio.sample_rate_hz) / 1000ULL;
   const auto hop_samples   = (static_cast<std::uint64_t>(config_.asr.hop_ms) *
                                config_.audio.sample_rate_hz) / 1000ULL;
+  std::size_t consumed_offset = 0;
 
-  // TODO(v2): VAD-based chunking:
-  //   - Instantiate Silero ONNX or libfvad depending on vad.engine.
-  //   - Accumulate while VAD detects speech.
-  //   - Close chunk on silence > vad.silence_duration_ms.
-  //   - Force-close on vad.max_chunk_duration_ms to bound latency.
-  //   - Prepend vad.leading_pad_ms of pre-speech audio.
-  //   - Inject previous utterance text as Whisper initial_prompt (sliding context).
+  const bool use_vad = (config_.vad.engine != "none");
 
   while (!token.stop_requested()) {
     RawAudioBlock block;
@@ -348,6 +428,7 @@ void PipelineOrchestrator::ingest_loop(std::stop_token token) {
     StageTimer timer(metrics_, StageId::kAudioIngest);
     const auto capture_time = block.capture_time;
 
+    // --- Step 1: downmix to mono -------------------------------------------
     for (std::size_t frame = 0; frame < block.frames; ++frame) {
       float mono = 0.0F;
       for (std::size_t ch = 0; ch < block.channels; ++ch) {
@@ -356,41 +437,180 @@ void PipelineOrchestrator::ingest_loop(std::stop_token token) {
       rolling_pcm.push_back(mono / static_cast<float>(block.channels));
     }
 
-    while (!token.stop_requested() &&
-           (rolling_pcm.size() - consumed_offset) >= chunk_samples) {
+    // --- Step 2: resample to 16kHz if needed --------------------------------
+    const float* pcm_16k    = nullptr;
+    std::size_t  pcm_16k_n  = 0;
 
-      if (!pipeline_ready_.load(std::memory_order_acquire)) {
-        // Warmup not complete — advance pointer to discard frames.
-        consumed_offset += hop_samples;
-        continue;
-      }
-
-      auto utt = std::make_unique<Utterance>();
-      utt->id    = next_utterance_id_.fetch_add(1, std::memory_order_relaxed);
-      utt->state = UtteranceState::QUEUED_FOR_ASR;
-      utt->metrics.capture_start = capture_time;
-      utt->metrics.capture_end   = Clock::now();
-      utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
-
-      // TODO(v2): resample to 16 kHz here using libsamplerate (preallocated buffer).
-      utt->source_pcm.assign(
-          rolling_pcm.begin() + static_cast<long long>(consumed_offset),
-          rolling_pcm.begin() + static_cast<long long>(consumed_offset + chunk_samples));
-
-      if (!ingest_to_asr_->try_push(std::move(utt))) {
-        metrics_.inc_queue_drop();
-      } else {
-        metrics_.inc_asr_requests();
-      }
-      consumed_offset += hop_samples;
+    if (ingest_resampler_ != nullptr) {
+      const std::size_t out_cap =
+          static_cast<std::size_t>(
+              static_cast<double>(rolling_pcm.size()) * ingest_resampler_->ratio()) + 64U;
+      if (resampled_mono.size() < out_cap) resampled_mono.resize(out_cap);
+      const std::size_t n = ingest_resampler_->process(
+          rolling_pcm.data(), rolling_pcm.size(),
+          resampled_mono.data(), resampled_mono.size());
+      rolling_pcm.clear();
+      pcm_16k   = resampled_mono.data();
+      pcm_16k_n = n;
+    } else {
+      pcm_16k   = rolling_pcm.data();
+      pcm_16k_n = rolling_pcm.size();
     }
 
-    // TRADEOFF: erase is O(n). A fixed ring-index avoids the copy but requires
-    // more careful boundary management. Accept for MVP; revisit if ingest CPU > 2%.
-    if (consumed_offset > rolling_pcm.size() / 2U) {
-      rolling_pcm.erase(rolling_pcm.begin(),
-                        rolling_pcm.begin() + static_cast<long long>(consumed_offset));
-      consumed_offset = 0;
+    if (pcm_16k_n == 0) continue;
+
+    if (!use_vad) {
+      // -----------------------------------------------------------------------
+      // Legacy fixed-window chunking path (vad.engine = "none").
+      // -----------------------------------------------------------------------
+      if (ingest_resampler_ == nullptr) {
+        // rolling_pcm was not cleared; use consumed_offset approach.
+        while (!token.stop_requested() &&
+               (rolling_pcm.size() - consumed_offset) >= chunk_samples) {
+          if (!pipeline_ready_.load(std::memory_order_acquire)) {
+            consumed_offset += hop_samples;
+            continue;
+          }
+          auto utt = std::make_unique<Utterance>();
+          utt->id    = next_utterance_id_.fetch_add(1, std::memory_order_relaxed);
+          utt->state = UtteranceState::QUEUED_FOR_ASR;
+          utt->metrics.capture_start = capture_time;
+          utt->metrics.capture_end   = Clock::now();
+          utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
+          utt->source_pcm.assign(
+              rolling_pcm.begin() + static_cast<long long>(consumed_offset),
+              rolling_pcm.begin() + static_cast<long long>(consumed_offset + chunk_samples));
+          if (!ingest_to_asr_->try_push(std::move(utt))) {
+            metrics_.inc_queue_drop();
+          } else {
+            metrics_.inc_asr_requests();
+          }
+          consumed_offset += hop_samples;
+        }
+        if (consumed_offset > rolling_pcm.size() / 2U) {
+          rolling_pcm.erase(rolling_pcm.begin(),
+                            rolling_pcm.begin() + static_cast<long long>(consumed_offset));
+          consumed_offset = 0;
+        }
+      } else {
+        // Resampled path: treat pcm_16k as a flat chunk.
+        if (!pipeline_ready_.load(std::memory_order_acquire)) {
+          // discard
+        } else if (pcm_16k_n >= chunk_samples) {
+          auto utt = std::make_unique<Utterance>();
+          utt->id    = next_utterance_id_.fetch_add(1, std::memory_order_relaxed);
+          utt->state = UtteranceState::QUEUED_FOR_ASR;
+          utt->metrics.capture_start = capture_time;
+          utt->metrics.capture_end   = Clock::now();
+          utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
+          utt->source_pcm.assign(pcm_16k, pcm_16k + chunk_samples);
+          if (!ingest_to_asr_->try_push(std::move(utt))) {
+            metrics_.inc_queue_drop();
+          } else {
+            metrics_.inc_asr_requests();
+          }
+        }
+      }
+      continue;
+    }
+
+    // -----------------------------------------------------------------------
+    // VAD-based chunking path.
+    // -----------------------------------------------------------------------
+    std::size_t offset = 0;
+    while (offset + vad_frame_samples <= pcm_16k_n && !token.stop_requested()) {
+      // Convert one VAD frame from float to int16.
+      vad_frame_int16.resize(vad_frame_samples);
+      for (std::size_t i = 0; i < vad_frame_samples; ++i) {
+        vad_frame_int16[i] = float_to_int16(pcm_16k[offset + i]);
+      }
+
+      const float speech_prob = vad_engine_->process_frame(
+          vad_frame_int16.data(), vad_frame_samples);
+      const bool is_speech = (speech_prob >= config_.vad.threshold);
+
+      if (vad_state == VadState::SILENCE) {
+        // Maintain a rolling pre-speech buffer for leading pad.
+        pre_speech_ring.insert(pre_speech_ring.end(),
+                               pcm_16k + offset,
+                               pcm_16k + offset + vad_frame_samples);
+        if (pre_speech_ring.size() > leading_pad_samples + vad_frame_samples) {
+          const std::size_t excess = pre_speech_ring.size() -
+                                     (leading_pad_samples + vad_frame_samples);
+          pre_speech_ring.erase(pre_speech_ring.begin(),
+                                pre_speech_ring.begin() +
+                                    static_cast<std::ptrdiff_t>(excess));
+        }
+
+        if (is_speech) {
+          vad_state = VadState::SPEECH;
+          silence_frame_count = 0;
+          // Seed speech buffer with leading pad.
+          speech_buffer.clear();
+          speech_buffer.insert(speech_buffer.end(),
+                               pre_speech_ring.begin(), pre_speech_ring.end());
+          pre_speech_ring.clear();
+        }
+      } else {
+        // SPEECH state: accumulate frame.
+        speech_buffer.insert(speech_buffer.end(),
+                             pcm_16k + offset,
+                             pcm_16k + offset + vad_frame_samples);
+
+        if (!is_speech) {
+          ++silence_frame_count;
+          const std::size_t silence_so_far = silence_frame_count * vad_frame_samples;
+          if (silence_so_far >= silence_samples) {
+            // End of utterance by silence timeout.
+            if (pipeline_ready_.load(std::memory_order_acquire) &&
+                !speech_buffer.empty()) {
+              auto utt = std::make_unique<Utterance>();
+              utt->id    = next_utterance_id_.fetch_add(1, std::memory_order_relaxed);
+              utt->state = UtteranceState::QUEUED_FOR_ASR;
+              utt->metrics.capture_start = capture_time;
+              utt->metrics.capture_end   = Clock::now();
+              utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
+              utt->source_pcm           = std::move(speech_buffer);
+              if (!ingest_to_asr_->try_push(std::move(utt))) {
+                metrics_.inc_queue_drop();
+              } else {
+                metrics_.inc_asr_requests();
+              }
+            }
+            speech_buffer.clear();
+            speech_buffer.reserve(max_chunk_samples + 512U);
+            vad_state = VadState::SILENCE;
+            silence_frame_count = 0;
+          }
+        } else {
+          // Back to active speech — reset silence counter.
+          silence_frame_count = 0;
+        }
+
+        // Force-close chunk if it exceeds max_chunk_duration_ms.
+        if (speech_buffer.size() >= max_chunk_samples) {
+          if (pipeline_ready_.load(std::memory_order_acquire)) {
+            auto utt = std::make_unique<Utterance>();
+            utt->id    = next_utterance_id_.fetch_add(1, std::memory_order_relaxed);
+            utt->state = UtteranceState::QUEUED_FOR_ASR;
+            utt->metrics.capture_start = capture_time;
+            utt->metrics.capture_end   = Clock::now();
+            utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
+            utt->source_pcm           = std::move(speech_buffer);
+            if (!ingest_to_asr_->try_push(std::move(utt))) {
+              metrics_.inc_queue_drop();
+            } else {
+              metrics_.inc_asr_requests();
+            }
+          }
+          speech_buffer.clear();
+          speech_buffer.reserve(max_chunk_samples + 512U);
+          vad_state = VadState::SILENCE;
+          silence_frame_count = 0;
+        }
+      }
+
+      offset += vad_frame_samples;
     }
   }
 }
@@ -415,10 +635,22 @@ void PipelineOrchestrator::asr_loop(std::stop_token token) {
       MEV_PROFILE_SCOPE("asr_inference");
       StageTimer timer(metrics_, StageId::kAsr);
 
+      // Update domain prompt before inference.
+      if (config_.asr.use_domain_prompt) {
+        const auto prompt = domain_adapter_->generate_asr_prompt();
+#if defined(MEV_ENABLE_WHISPER_CPP)
+        if (auto* we = dynamic_cast<WhisperASREngine*>(asr_engine_.get())) {
+          we->set_domain_prompt(prompt);
+        }
+#else
+        (void)prompt;
+#endif
+      }
+
       AsrRequest req;
       req.sequence    = static_cast<SequenceNumber>(utt->id);
       req.created_at  = utt->metrics.capture_start;
-      req.sample_rate = config_.audio.sample_rate_hz;
+      req.sample_rate = 16000;  // ingest loop resamples to 16kHz
       req.prompt_hint = utt->asr_prompt_hint;
       req.mono_pcm    = utt->source_pcm;
 
@@ -524,21 +756,33 @@ void PipelineOrchestrator::tts_loop(std::stop_token token) {
 
     if (use_gpu) gpu_scheduler_.tts_release();
 
-    utt->metrics.tts_end    = Clock::now();
+    utt->metrics.tts_end      = Clock::now();
     utt->metrics.output_start = Clock::now();
     utt->state = UtteranceState::QUEUED_FOR_OUTPUT;
 
-    // TODO(v2): resample synth_pcm from tts_engine_->output_sample_rate()
-    //   to config_.audio.sample_rate_hz using libsamplerate (preallocated buffer).
+    // Resample TTS output from tts_engine_->output_sample_rate() to audio output rate.
+    std::vector<float>* output_pcm = &utt->synth_pcm;
+    std::vector<float> resampled_pcm;
+    if (tts_resampler_ != nullptr) {
+      const std::size_t out_capacity =
+          static_cast<std::size_t>(
+              static_cast<double>(utt->synth_pcm.size()) * tts_resampler_->ratio()) + 64U;
+      resampled_pcm.resize(out_capacity);
+      const std::size_t n = tts_resampler_->process(
+          utt->synth_pcm.data(), utt->synth_pcm.size(),
+          resampled_pcm.data(), resampled_pcm.size());
+      resampled_pcm.resize(n);
+      output_pcm = &resampled_pcm;
+    }
 
     std::size_t offset = 0;
-    while (offset < utt->synth_pcm.size()) {
+    while (offset < output_pcm->size()) {
       OutputAudioBlock blk;
       blk.sequence = static_cast<SequenceNumber>(utt->id);
-      const auto remaining = utt->synth_pcm.size() - offset;
+      const auto remaining = output_pcm->size() - offset;
       blk.frames = static_cast<std::uint16_t>(
           std::min<std::size_t>(remaining, config_.audio.frames_per_buffer));
-      std::copy_n(utt->synth_pcm.begin() + static_cast<long long>(offset),
+      std::copy_n(output_pcm->begin() + static_cast<long long>(offset),
                   blk.frames, blk.mono.begin());
       offset += blk.frames;
       if (!tts_to_output_->try_push(std::move(blk))) {
@@ -585,7 +829,6 @@ void PipelineOrchestrator::supervisor_loop(std::stop_token token) {
       if (est_ms > config_.pipeline.critical_threshold_ms) {
         MEV_LOG_ERROR("[WATCHDOG] critical latency est=", est_ms, "ms — backlog too deep");
         metrics_.inc_degradation_event();
-        // TODO(v2): TtsScheduler::flush_all_as_stale() for hard flush
       } else if (est_ms > config_.pipeline.warning_threshold_ms) {
         MEV_LOG_WARN("[WATCHDOG] latency warning est=", est_ms, "ms");
       }

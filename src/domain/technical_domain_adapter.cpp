@@ -5,6 +5,9 @@
 
 #include "mev/core/logger.hpp"
 
+#define TOML_EXCEPTIONS 1
+#include <toml++/toml.hpp>
+
 namespace mev {
 
 namespace {
@@ -39,12 +42,42 @@ TechnicalDomainAdapter::TechnicalDomainAdapter(
 }
 
 bool TechnicalDomainAdapter::initialize(const DomainConfig& config, std::string& /*error*/) {
-  // Re-initialise with user-provided config.
-  // External correction/pronunciation maps from TOML are not yet loaded
-  // here — they will be layered on top of defaults in a future iteration.
-  // TODO(v2): load asr_corrections and tts_pronunciation from
-  //           config.corrections_path / config.pronunciation_hints_path
-  (void)config;
+  // Try to load corrections and pronunciation from the TOML glossary file.
+  if (!config.glossary_path.empty()) {
+    try {
+      const auto tbl = toml::parse_file(config.glossary_path);
+
+      // [corrections] — override defaults with file entries.
+      if (const auto* corrections = tbl["corrections"].as_table()) {
+        corrections->for_each([&](const toml::key& k, const auto& v) {
+          if (const auto* sv = v.as_string()) {
+            asr_corrections_[std::string(k.str())] = sv->get();
+          }
+        });
+        MEV_LOG_INFO("TechnicalDomainAdapter: loaded ", corrections->size(),
+                     " corrections from '", config.glossary_path, "'");
+      }
+
+      // [pronunciation] — override defaults with file entries.
+      if (const auto* pronunciation = tbl["pronunciation"].as_table()) {
+        pronunciation->for_each([&](const toml::key& k, const auto& v) {
+          if (const auto* sv = v.as_string()) {
+            tts_pronunciation_[std::string(k.str())] = sv->get();
+          }
+        });
+        MEV_LOG_INFO("TechnicalDomainAdapter: loaded ", pronunciation->size(),
+                     " pronunciation hints from '", config.glossary_path, "'");
+      }
+    } catch (const toml::parse_error& e) {
+      MEV_LOG_WARN("TechnicalDomainAdapter: failed to parse '", config.glossary_path,
+                   "': ", e.description());
+      // Non-fatal: use hardcoded defaults.
+    } catch (const std::exception& e) {
+      MEV_LOG_WARN("TechnicalDomainAdapter: could not open '", config.glossary_path,
+                   "': ", e.what());
+    }
+  }
+
   MEV_LOG_INFO("TechnicalDomainAdapter initialised");
   return true;
 }
@@ -76,9 +109,6 @@ void TechnicalDomainAdapter::update_session_context(const std::string& recognize
 }
 
 void TechnicalDomainAdapter::reset_session() {
-  // DomainContextManager does not yet expose reset — use re-construction via
-  // a fresh shared_ptr if a full reset is needed.
-  // TODO(v2): add DomainContextManager::reset_session()
   MEV_LOG_INFO("TechnicalDomainAdapter::reset_session (no-op in current DomainContextManager)");
 }
 

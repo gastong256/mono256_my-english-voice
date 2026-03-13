@@ -22,7 +22,8 @@ it to a virtual microphone device for use in video calls.
                              ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Thread 2  Ingest Worker                                                 │
-│    VAD chunking (Silero/libfvad) + fixed-window fallback                 │
+│    VAD chunking (libfvad) + fixed-window fallback                        │
+│    Resamples mic→16kHz via libsamplerate (when enabled)                  │
 │    Builds Utterance{source_pcm} → domain prompt → QUEUED_FOR_ASR        │
 └────────────────────────────┬─────────────────────────────────────────────┘
                              │ ingest_to_asr_ (SPSC, unique_ptr<Utterance>)
@@ -45,6 +46,7 @@ it to a virtual microphone device for use in video calls.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Thread 5  TTS Worker  [GPU, fallback CPU on ASR contention]             │
 │    Piper TTS (VITS ONNX) → eSpeak fallback                               │
+│    Resamples TTS→output_rate via libsamplerate (when enabled)            │
 │    Fills Utterance{synth_pcm} → OutputAudioBlocks → tts_to_output_      │
 └────────────────────────────┬─────────────────────────────────────────────┘
                              │ tts_to_output_ (SPSC, OutputAudioBlock)
@@ -80,44 +82,100 @@ When ASR is running, TTS falls back to CPU automatically
 
 ## Dependencies
 
-| Library | Purpose | Status |
-|---------|---------|--------|
-| [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | ASR inference | Interface ready; stub active |
-| [ONNX Runtime](https://github.com/microsoft/onnxruntime) | Piper TTS / Silero VAD | Interface ready; stub active |
-| [Piper TTS](https://github.com/rhasspy/piper) | Primary TTS backend | Stub; enable `MEV_ENABLE_ONNXRUNTIME` |
-| [eSpeak-ng](https://github.com/espeak-ng/espeak-ng) | TTS fallback | Stub; enable `MEV_ENABLE_ESPEAK` |
-| [PortAudio](http://www.portaudio.com/) | Real audio I/O | Stub; enable `MEV_ENABLE_PORTAUDIO` |
-| [libsamplerate](https://libsndfile.github.io/libsamplerate/) | ASR/TTS resampling | TODO; enable `MEV_ENABLE_LIBSAMPLERATE` |
-| Silero VAD (ONNX) or [libfvad](https://github.com/dpirch/libfvad) | Voice activity detection | TODO; enable `MEV_ENABLE_WEBRTCVAD` |
+| Library | Purpose | Flag | Status |
+|---------|---------|------|--------|
+| [toml++](https://github.com/marzer/tomlplusplus) | Config parser | always on (FetchContent) | Active |
+| [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | ASR inference | `MEV_ENABLE_WHISPER_CPP` | FetchContent v1.7.4 |
+| [ONNX Runtime](https://github.com/microsoft/onnxruntime) | Piper TTS | `MEV_ENABLE_ONNXRUNTIME` | Pre-built binary |
+| [Piper TTS](https://github.com/rhasspy/piper) | Primary TTS backend | `MEV_ENABLE_ONNXRUNTIME` | Stub until ONNX linked |
+| [eSpeak-ng](https://github.com/espeak-ng/espeak-ng) | TTS fallback | `MEV_ENABLE_ESPEAK` | Real synthesis |
+| [PortAudio](http://www.portaudio.com/) | Real audio I/O | `MEV_ENABLE_PORTAUDIO` | Real I/O |
+| [libsamplerate](https://libsndfile.github.io/libsamplerate/) | ASR/TTS resampling | `MEV_ENABLE_LIBSAMPLERATE` | Real resampling |
+| [libfvad](https://github.com/dpirch/libfvad) | Voice activity detection | `MEV_ENABLE_WEBRTCVAD` | FetchContent |
 
 C++ standard: **C++20** (requires GCC ≥ 13 or Clang ≥ 16).
 
 ---
 
-## Build
+## System dependencies
 
-### Prerequisites (Ubuntu/Debian)
+### Required
 
 ```bash
+# Ubuntu/Debian
 sudo apt install cmake ninja-build g++-13 libpthread-stubs0-dev
 ```
 
-### Configure & build
+### Optional — install only the backends you want
 
 ```bash
-# Debug build (tests + benchmarks enabled)
+# Audio I/O (for -DMEV_ENABLE_PORTAUDIO=ON)
+sudo apt install libportaudio2 portaudio19-dev
+
+# TTS fallback (for -DMEV_ENABLE_ESPEAK=ON)
+sudo apt install libespeak-ng-dev
+
+# Resampling (for -DMEV_ENABLE_LIBSAMPLERATE=ON)
+sudo apt install libsamplerate0-dev
+
+# VAD — libfvad is fetched automatically via FetchContent when
+# -DMEV_ENABLE_WEBRTCVAD=ON; no apt package needed.
+
+# whisper.cpp — fetched automatically via FetchContent when
+# -DMEV_ENABLE_WHISPER_CPP=ON; no apt package needed.
+```
+
+### ONNX Runtime (for Piper TTS with -DMEV_ENABLE_ONNXRUNTIME=ON)
+
+```bash
+wget https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-linux-x64-gpu-1.17.3.tgz
+tar xzf onnxruntime-linux-x64-gpu-1.17.3.tgz
+export ONNXRUNTIME_ROOT=$(pwd)/onnxruntime-linux-x64-gpu-1.17.3
+```
+
+---
+
+## Build
+
+### Minimal build (stubs only, no external libs required)
+
+```bash
 cmake --preset debug
 cmake --build --preset debug -j$(nproc)
+ctest --preset debug --output-on-failure
+```
 
-# Release build with GPU paths enabled
+### Full build (all real backends)
+
+```bash
 cmake -B build/release \
   -DCMAKE_BUILD_TYPE=Release \
   -DMEV_ENABLE_GPU=ON \
+  -DMEV_ENABLE_PORTAUDIO=ON \
+  -DMEV_ENABLE_WHISPER_CPP=ON \
   -DMEV_ENABLE_ONNXRUNTIME=ON \
-  -DMEV_ENABLE_PORTAUDIO=ON
+  -DMEV_ENABLE_ESPEAK=ON \
+  -DMEV_ENABLE_LIBSAMPLERATE=ON \
+  -DMEV_ENABLE_WEBRTCVAD=ON \
+  -DONNXRUNTIME_ROOT=${ONNXRUNTIME_ROOT}
 cmake --build build/release -j$(nproc)
+```
 
-# Enable profiling macros (adds MEV_PROFILE_SCOPE instrumentation)
+### Selective feature build
+
+```bash
+# PortAudio + eSpeak only (no GPU)
+cmake -B build/audio \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DMEV_ENABLE_PORTAUDIO=ON \
+  -DMEV_ENABLE_ESPEAK=ON \
+  -DMEV_ENABLE_LIBSAMPLERATE=ON
+cmake --build build/audio -j$(nproc)
+```
+
+### Enable profiling macros
+
+```bash
 cmake --preset debug -DMEV_ENABLE_PROFILING=ON
 ```
 
@@ -127,6 +185,7 @@ cmake --preset debug -DMEV_ENABLE_PROFILING=ON
 ctest --preset debug --output-on-failure
 
 # Individual test binaries (for debugging)
+./build/debug/tests/test_toml_config
 ./build/debug/tests/test_utterance_lifecycle
 ./build/debug/tests/test_tts_scheduler_policy
 ./build/debug/tests/test_domain_corrections
@@ -192,11 +251,20 @@ sudo modprobe snd-aloop
 ## Run
 
 ```bash
-./build/debug/apps/voice_mic/mev_voice_mic config/pipeline.toml
+# Basic run with default config
+./build/debug/apps/voice_mic/mev_voice_mic
 
-# Override specific values via config keys in a second file or flags:
-./build/debug/apps/voice_mic/mev_voice_mic config/pipeline.toml
-# (currently INI-format; full TOML loader planned for v2)
+# Specify config file
+./build/debug/apps/voice_mic/mev_voice_mic --config config/pipeline.toml
+
+# Override individual fields after TOML load
+./build/debug/apps/voice_mic/mev_voice_mic \
+  --config config/pipeline.toml \
+  --tts.engine espeak \
+  --runtime.run_duration_seconds 60
+
+# Print help
+./build/debug/apps/voice_mic/mev_voice_mic --help
 ```
 
 The pipeline starts in **NORMAL** mode, runs warmup (dummy ASR + TTS inference),
@@ -208,11 +276,13 @@ then opens audio I/O. The `[HEALTH]` log line is emitted every
 [INFO]  [METRICS] utterance_id=42 total_ms=723.4 asr_ms=412.1 tts_ms=203.5 state=COMPLETED
 ```
 
+Press **Ctrl+C** to stop cleanly (SIGINT triggers graceful shutdown).
+
 ---
 
 ## Configuration
 
-Main config: `config/pipeline.toml` — see file comments for all options.
+Main config: `config/pipeline.toml` — parsed by toml++ (always linked via FetchContent).
 
 Domain vocabulary: `config/tech_glossary.toml`
 - `[corrections]` — ASR post-processing (Whisper mis-transcriptions → correct term)
@@ -223,17 +293,29 @@ Pronunciation overrides: `config/pronunciation_hints.toml`
 
 ---
 
+## CLI overrides
+
+Any config field can be overridden after TOML load with `--<section>.<key> <value>`:
+
+```bash
+--audio.input_device "HDA Intel PCH"
+--audio.sample_rate_hz 48000
+--asr.model_path models/ggml-tiny.bin
+--tts.engine espeak
+--tts.enable_gpu false
+--vad.engine webrtcvad
+--runtime.run_duration_seconds 120
+--logging.level debug
+```
+
+---
+
 ## Roadmap
 
 | Item | Notes |
 |------|-------|
-| Real audio I/O | PortAudio backend preserving RT-safe callbacks |
-| whisper.cpp ASR | Replace `WhisperAsrStub`; enable partial hypothesis callback |
-| Piper TTS | Link ONNX Runtime, implement `PiperTTSEngine::synthesize()` |
-| Silero VAD | Replace fixed-window chunking with hybrid VAD + timeout |
-| libsamplerate | 16 kHz resampling in Ingest, output resampling in TTS worker |
 | XTTSv2 | When stable ONNX export is available (`ITTSEngine` interface ready) |
 | macOS support | BlackHole virtual mic + CoreAudio backend |
 | Windows support | VB-Cable + WASAPI backend |
-| TOML config loader | Replace INI parser with `toml++` FetchContent integration |
 | Partial hypotheses | Streaming text output from Whisper for lower perceived latency |
+| piper-phonemize | Accurate text-to-phoneme conversion for Piper TTS (currently ASCII placeholder) |

@@ -18,3 +18,28 @@ add_mev_test(test_tts_scheduler_policy test_tts_scheduler_policy.cpp)
 add_mev_test(test_domain_corrections   test_domain_corrections.cpp)
 add_mev_test(test_gpu_scheduler        test_gpu_scheduler.cpp)
 add_mev_test(test_pipeline_shutdown    test_pipeline_shutdown.cpp)
+
+# Phase 2 integration tests
+# Always compiled: TOML config parser test
+add_mev_test(test_toml_config test_toml_config.cpp)
+
+# Conditionally compiled: real backend tests (skip gracefully when libs absent)
+if(MEV_ENABLE_LIBSAMPLERATE)
+  add_mev_test(test_resampler test_resampler.cpp)
+endif()
+
+if(MEV_ENABLE_WHISPER_CPP)
+  add_mev_test(test_whisper_asr test_whisper_asr.cpp)
+endif()
+
+if(MEV_ENABLE_WEBRTCVAD)
+  add_mev_test(test_vad_engine test_vad_engine.cpp)
+endif()
+
+if(MEV_ENABLE_PORTAUDIO)
+  add_mev_test(test_portaudio_enum test_portaudio_enum.cpp)
+endif()
+
+if(MEV_ENABLE_ONNXRUNTIME)
+  add_mev_test(test_piper_tts test_piper_tts.cpp)
+endif()

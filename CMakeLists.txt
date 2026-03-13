@@ -29,19 +29,38 @@ option(MEV_ENABLE_PROFILING       "Enable pipeline profiling macros (MEV_PROFILE
 option(MEV_FETCH_DEPS             "Allow FetchContent dependency downloads (e.g. toml++)" OFF)
 
 # ---------------------------------------------------------------------------
-# Optional: fetch toml++ (header-only, needed for future TOML loader)
+# Fetch toml++ (header-only, always fetched — used for TOML config loader)
 # ---------------------------------------------------------------------------
-if(MEV_FETCH_DEPS)
-  include(FetchContent)
-  FetchContent_Declare(
-    tomlplusplus
-    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
-    GIT_TAG        v3.4.0
+include(FetchContent)
+FetchContent_Declare(
+  tomlplusplus
+  GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+  GIT_TAG        v3.4.0
+)
+FetchContent_MakeAvailable(tomlplusplus)
+
+# ---------------------------------------------------------------------------
+# Optional: fetch whisper.cpp ASR backend
+# ---------------------------------------------------------------------------
+if(MEV_ENABLE_WHISPER_CPP)
+  FetchContent_Declare(whisper
+    GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
+    GIT_TAG        v1.7.4
   )
-  FetchContent_MakeAvailable(tomlplusplus)
-  # TODO(v2): link tomlplusplus::tomlplusplus to mev and use it to
-  #   load config/pipeline.toml + config/tech_glossary.toml natively.
-  #   The current INI parser is a lightweight stand-in.
+  set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(whisper)
+endif()
+
+# ---------------------------------------------------------------------------
+# Optional: fetch libfvad (WebRTC VAD)
+# ---------------------------------------------------------------------------
+if(MEV_ENABLE_WEBRTCVAD)
+  FetchContent_Declare(libfvad
+    GIT_REPOSITORY https://github.com/dpirch/libfvad.git
+    GIT_TAG        master
+  )
+  FetchContent_MakeAvailable(libfvad)
 endif()
 
 include(cmake/CompilerWarnings.cmake)
