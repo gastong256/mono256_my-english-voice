@@ -9,6 +9,13 @@
 
 namespace mev {
 
+// C4324: structure padded due to alignment specifier — intentional; head_ and
+// tail_ live on separate cache lines to eliminate false sharing between the
+// producer and consumer threads.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
 template <typename T>
 class SpscRingBuffer {
  public:
@@ -102,5 +109,8 @@ class SpscRingBuffer {
   alignas(64) std::atomic<std::size_t> head_{0};
   alignas(64) std::atomic<std::size_t> tail_{0};
 };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 }  // namespace mev
