@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "mev/tts/tts_config.hpp"
+#include "mev/tts/tts_types.hpp"
 
 // NEXT STEP: XTTSv2Engine cuando exista export ONNX estable.
 
@@ -35,6 +36,12 @@ class ITTSEngine {
   // Returns true on success; pcm_out is filled with synthesized samples.
   // Returns false if synthesis fails; pcm_out may be empty or partial.
   [[nodiscard]] virtual bool synthesize(const std::string& text, std::vector<float>& pcm_out) = 0;
+
+  // Low-latency clause/partial synthesis entrypoint. Implementations may vary
+  // voice speed or execution policy for partial chunks, but they must not
+  // rewrite already-emitted audio.
+  [[nodiscard]] virtual bool synthesize_chunk(const SpeechChunk& chunk,
+                                              std::vector<float>& pcm_out) = 0;
 
   // Sample rate of the PCM produced by synthesize().
   [[nodiscard]] virtual int output_sample_rate() const = 0;

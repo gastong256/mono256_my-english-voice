@@ -70,17 +70,26 @@ void EspeakTTSEngine::warmup() {
 }
 
 bool EspeakTTSEngine::synthesize(const std::string& text, std::vector<float>& pcm_out) {
+  SpeechChunk chunk;
+  chunk.text = text;
+  chunk.is_partial = false;
+  chunk.is_final = true;
+  return synthesize_chunk(chunk, pcm_out);
+}
+
+bool EspeakTTSEngine::synthesize_chunk(const SpeechChunk& chunk, std::vector<float>& pcm_out) {
   if (!initialized_) {
     return false;
   }
 
 #if defined(MEV_ENABLE_ESPEAK)
+  espeak_SetParameter(espeakRATE, chunk.is_partial ? 220 : 170, 0);
   g_espeak_pcm_out.clear();
 
   unsigned int identifier = 0;
   const espeak_ERROR err = espeak_Synth(
-      text.c_str(),
-      text.size() + 1U,
+      chunk.text.c_str(),
+      chunk.text.size() + 1U,
       0,
       POS_CHARACTER,
       0,
@@ -101,7 +110,7 @@ bool EspeakTTSEngine::synthesize(const std::string& text, std::vector<float>& pc
   }
   return true;
 #else
-  (void)text;
+  (void)chunk;
   pcm_out.clear();
   MEV_LOG_ERROR("EspeakTTSEngine: synthesize requested but espeak-ng is not compiled in");
   return false;

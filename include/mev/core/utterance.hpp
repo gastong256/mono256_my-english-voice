@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "mev/core/types.hpp"
+#include "mev/tts/tts_types.hpp"
 
 namespace mev {
 
@@ -100,6 +101,8 @@ struct Utterance {
 
   // -- TTS result --
   std::vector<float> synth_pcm;  // synthesized PCM (at TTS engine sample rate)
+  std::vector<SpeechChunk> speech_chunks;
+  bool tts_used_preview_engine{false};
 
   // -- Scheduling metadata --
   LatencyMetrics metrics;

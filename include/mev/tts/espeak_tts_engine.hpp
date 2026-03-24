@@ -24,6 +24,8 @@ class EspeakTTSEngine final : public ITTSEngine {
   bool initialize(const TTSConfig& config, std::string& error) override;
   void warmup() override;
   [[nodiscard]] bool synthesize(const std::string& text, std::vector<float>& pcm_out) override;
+  [[nodiscard]] bool synthesize_chunk(const SpeechChunk& chunk,
+                                      std::vector<float>& pcm_out) override;
   [[nodiscard]] int output_sample_rate() const override { return sample_rate_; }
   [[nodiscard]] std::string engine_name() const override { return "espeak"; }
   [[nodiscard]] bool gpu_requested() const override { return false; }

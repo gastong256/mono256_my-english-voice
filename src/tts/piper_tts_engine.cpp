@@ -763,6 +763,10 @@ bool PiperTTSEngine::synthesize(const std::string& text, std::vector<float>& pcm
 #endif
 }
 
+bool PiperTTSEngine::synthesize_chunk(const SpeechChunk& chunk, std::vector<float>& pcm_out) {
+  return synthesize(chunk.text, pcm_out);
+}
+
 void PiperTTSEngine::shutdown() {
   initialized_ = false;
   warmed_up_ = false;

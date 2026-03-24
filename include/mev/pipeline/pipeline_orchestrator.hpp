@@ -151,6 +151,7 @@ class PipelineOrchestrator final : public IPipelineOrchestrator {
   std::unique_ptr<IVadEngine>   vad_engine_;
   std::unique_ptr<Resampler>    ingest_resampler_;   // mic_rate → 16kHz
   std::unique_ptr<Resampler>    tts_resampler_;      // tts_rate → output_rate
+  bool prefer_tts_preview_{false};
 
   // ---- Worker threads ---------------------------------------------------
   std::jthread ingest_thread_;      // Thread 2

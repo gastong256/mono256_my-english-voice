@@ -19,6 +19,7 @@
 #include "mev/infra/metrics.hpp"
 #include "mev/tts/espeak_tts_engine.hpp"
 #include "mev/tts/piper_tts_engine.hpp"
+#include "mev/tts/speech_chunker.hpp"
 #include "mev/tts/stub_tts_engine.hpp"
 
 #if defined(MEV_ENABLE_PORTAUDIO)
@@ -70,11 +71,14 @@ std::unique_ptr<ITTSEngine> make_tts_engine(const std::string& engine_name,
 
   TTSConfig tts_cfg;
   tts_cfg.engine             = engine_name;
+  tts_cfg.mode               = cfg.mode;
   tts_cfg.model_path         = cfg.model_path;
   tts_cfg.piper_data_path    = cfg.piper_data_path;
   tts_cfg.speaker_id         = cfg.speaker_id;
   tts_cfg.gpu_enabled        = cfg.enable_gpu;
   tts_cfg.output_sample_rate = cfg.output_sample_rate;
+  tts_cfg.preview_engine     = cfg.preview_engine;
+  tts_cfg.max_primary_tts_budget_ms = cfg.max_primary_tts_budget_ms;
 
   if (!engine->initialize(tts_cfg, error)) {
     return nullptr;
@@ -268,11 +272,11 @@ bool PipelineOrchestrator::initialize_components() {
     transition_to_mode(PipelineMode::DEGRADED);
   }
 
-  // Always keep an eSpeak engine ready for MINIMAL mode.
+  // Keep the preview/fallback engine ready for low-latency clauses and failures.
   {
     std::string fb_err;
-    tts_fallback_engine_ = make_tts_engine("espeak", config_.tts, fb_err);
-    // Non-fatal: eSpeak may not be installed
+    tts_fallback_engine_ = make_tts_engine(config_.tts.preview_engine, config_.tts, fb_err);
+    // Non-fatal: preview engine may not be installed in minimal builds.
   }
 
   // Domain adapter.
@@ -363,6 +367,11 @@ bool PipelineOrchestrator::warmup_models() {
       metrics_.inc_degradation_event();
       transition_to_mode(PipelineMode::MINIMAL);
     }
+  }
+
+  if (tts_fallback_engine_ &&
+      tts_fallback_engine_->engine_name() != tts_engine_->engine_name()) {
+    tts_fallback_engine_->warmup();
   }
 
   const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -863,23 +872,142 @@ void PipelineOrchestrator::tts_loop(std::stop_token token) {
     utt->state = UtteranceState::SYNTHESIZING;
     utt->metrics.tts_start = Clock::now();
 
-    const bool use_gpu = try_activate_tts_on_gpu();
+    const bool start_with_preview =
+        (config_.tts.mode == "interactive_preview") || prefer_tts_preview_;
+    const bool use_gpu = (!start_with_preview && tts_engine_ != nullptr &&
+                          tts_engine_->using_gpu())
+                             ? try_activate_tts_on_gpu()
+                             : false;
 
     {
       MEV_PROFILE_SCOPE("tts_inference");
       StageTimer tts_timer(metrics_, StageId::kTts);
       metrics_.inc_tts_requests();
 
-      bool ok = tts_engine_->synthesize(utt->normalized_text, utt->synth_pcm);
-      if (!ok && tts_fallback_engine_) {
-        MEV_LOG_WARN("primary TTS failed; using fallback for id=", utt->id);
-        ok = tts_fallback_engine_->synthesize(utt->normalized_text, utt->synth_pcm);
-        if (ok) {
-          activate_tts_fallback("runtime synthesis failure");
+      utt->speech_chunks = chunk_text_for_realtime_tts(
+          static_cast<SequenceNumber>(utt->id), utt->normalized_text, utt->asr_is_partial,
+          Clock::now(), config_.tts.max_primary_tts_budget_ms);
+
+      bool use_preview_for_remaining = start_with_preview;
+      utt->tts_used_preview_engine = use_preview_for_remaining;
+      utt->synth_pcm.clear();
+
+      auto enqueue_chunk_pcm = [&](const std::vector<float>& input_pcm,
+                                   const int source_rate) -> bool {
+        std::vector<float>* output_pcm = const_cast<std::vector<float>*>(&input_pcm);
+        std::vector<float> resampled_pcm;
+        if (tts_resampler_ != nullptr && source_rate == tts_engine_->output_sample_rate()) {
+          const std::size_t out_capacity =
+              static_cast<std::size_t>(
+                  static_cast<double>(input_pcm.size()) * tts_resampler_->ratio()) + 64U;
+          resampled_pcm.resize(out_capacity);
+          const std::size_t n = tts_resampler_->process(
+              input_pcm.data(), input_pcm.size(),
+              resampled_pcm.data(), resampled_pcm.size());
+          resampled_pcm.resize(n);
+          output_pcm = &resampled_pcm;
+        } else if (source_rate != static_cast<int>(config_.audio.sample_rate_hz)) {
+#if defined(MEV_ENABLE_LIBSAMPLERATE)
+          Resampler local_resampler;
+          if (!local_resampler.initialize(
+                  static_cast<double>(config_.audio.sample_rate_hz) /
+                      static_cast<double>(std::max(source_rate, 1)),
+                  1)) {
+            return false;
+          }
+          const std::size_t out_capacity =
+              static_cast<std::size_t>(
+                  static_cast<double>(input_pcm.size()) * local_resampler.ratio()) + 64U;
+          resampled_pcm.resize(out_capacity);
+          const std::size_t n = local_resampler.process(
+              input_pcm.data(), input_pcm.size(),
+              resampled_pcm.data(), resampled_pcm.size());
+          resampled_pcm.resize(n);
+          output_pcm = &resampled_pcm;
+#endif
+        }
+
+        if (utt->metrics.output_start == TimePoint{}) {
+          utt->metrics.output_start = Clock::now();
+        }
+
+        std::size_t offset = 0;
+        while (offset < output_pcm->size()) {
+          OutputAudioBlock blk;
+          blk.sequence = static_cast<SequenceNumber>(utt->id);
+          const auto remaining = output_pcm->size() - offset;
+          blk.frames = static_cast<std::uint16_t>(
+              std::min<std::size_t>(remaining, config_.audio.frames_per_buffer));
+          std::copy_n(output_pcm->begin() + static_cast<long long>(offset),
+                      blk.frames, blk.mono.begin());
+          offset += blk.frames;
+          if (!tts_to_output_->try_push(std::move(blk))) {
+            metrics_.inc_queue_drop();
+            return false;
+          }
+        }
+        return true;
+      };
+
+      bool all_chunks_ok = !utt->speech_chunks.empty();
+      for (auto& chunk : utt->speech_chunks) {
+        ITTSEngine* active_engine =
+            (use_preview_for_remaining && tts_fallback_engine_)
+                ? tts_fallback_engine_.get()
+                : tts_engine_.get();
+        if (!active_engine) {
+          all_chunks_ok = false;
+          break;
+        }
+
+        const bool using_primary_engine = (active_engine == tts_engine_.get());
+        std::vector<float> chunk_pcm;
+        const auto chunk_t0 = std::chrono::steady_clock::now();
+        bool ok = active_engine->synthesize_chunk(chunk, chunk_pcm);
+        const auto chunk_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - chunk_t0).count();
+
+        if ((!ok || chunk_pcm.empty()) && using_primary_engine && tts_fallback_engine_) {
+          MEV_LOG_WARN("primary TTS failed for chunk; using preview engine for id=", utt->id);
+          chunk_pcm.clear();
+          ok = tts_fallback_engine_->synthesize_chunk(chunk, chunk_pcm);
+          use_preview_for_remaining = true;
+          prefer_tts_preview_ = ok;
+          utt->tts_used_preview_engine = ok;
+          if (ok) {
+            chunk.sample_rate = static_cast<std::uint32_t>(tts_fallback_engine_->output_sample_rate());
+          }
+        } else {
+          chunk.sample_rate = static_cast<std::uint32_t>(active_engine->output_sample_rate());
+        }
+
+        if (!ok || chunk_pcm.empty()) {
+          all_chunks_ok = false;
+          break;
+        }
+
+        chunk.mono_pcm = chunk_pcm;
+        utt->synth_pcm.insert(utt->synth_pcm.end(), chunk_pcm.begin(), chunk_pcm.end());
+
+        if (!enqueue_chunk_pcm(chunk_pcm, static_cast<int>(chunk.sample_rate))) {
+          all_chunks_ok = false;
+          break;
+        }
+
+        if (using_primary_engine &&
+            config_.tts.mode == "interactive_balanced" &&
+            chunk_ms > static_cast<long long>(config_.tts.max_primary_tts_budget_ms) &&
+            tts_fallback_engine_) {
+          MEV_LOG_WARN("primary TTS exceeded budget (", chunk_ms,
+                       "ms > ", config_.tts.max_primary_tts_budget_ms,
+                       "ms); switching to preview engine for newer chunks");
+          use_preview_for_remaining = true;
+          prefer_tts_preview_ = true;
+          utt->tts_used_preview_engine = true;
         }
       }
 
-      if (!ok || utt->synth_pcm.empty()) {
+      if (!all_chunks_ok || utt->synth_pcm.empty()) {
         utt->state = UtteranceState::FAILED;
         if (use_gpu) gpu_scheduler_.tts_release();
         continue;
@@ -889,39 +1017,7 @@ void PipelineOrchestrator::tts_loop(std::stop_token token) {
     if (use_gpu) gpu_scheduler_.tts_release();
 
     utt->metrics.tts_end      = Clock::now();
-    utt->metrics.output_start = Clock::now();
     utt->state = UtteranceState::QUEUED_FOR_OUTPUT;
-
-    // Resample TTS output from tts_engine_->output_sample_rate() to audio output rate.
-    std::vector<float>* output_pcm = &utt->synth_pcm;
-    std::vector<float> resampled_pcm;
-    if (tts_resampler_ != nullptr) {
-      const std::size_t out_capacity =
-          static_cast<std::size_t>(
-              static_cast<double>(utt->synth_pcm.size()) * tts_resampler_->ratio()) + 64U;
-      resampled_pcm.resize(out_capacity);
-      const std::size_t n = tts_resampler_->process(
-          utt->synth_pcm.data(), utt->synth_pcm.size(),
-          resampled_pcm.data(), resampled_pcm.size());
-      resampled_pcm.resize(n);
-      output_pcm = &resampled_pcm;
-    }
-
-    std::size_t offset = 0;
-    while (offset < output_pcm->size()) {
-      OutputAudioBlock blk;
-      blk.sequence = static_cast<SequenceNumber>(utt->id);
-      const auto remaining = output_pcm->size() - offset;
-      blk.frames = static_cast<std::uint16_t>(
-          std::min<std::size_t>(remaining, config_.audio.frames_per_buffer));
-      std::copy_n(output_pcm->begin() + static_cast<long long>(offset),
-                  blk.frames, blk.mono.begin());
-      offset += blk.frames;
-      if (!tts_to_output_->try_push(std::move(blk))) {
-        metrics_.inc_queue_drop();
-        break;
-      }
-    }
 
     utt->state = UtteranceState::COMPLETED;
     const auto e2e_us = static_cast<std::uint64_t>(
@@ -933,6 +1029,8 @@ void PipelineOrchestrator::tts_loop(std::stop_token token) {
                    " total_ms=", utt->metrics.total_ms(),
                    " asr_ms=", utt->metrics.asr_ms(),
                    " tts_ms=", utt->metrics.tts_ms(),
+                   " speech_chunks=", utt->speech_chunks.size(),
+                   " preview=", utt->tts_used_preview_engine,
                    " state=COMPLETED");
     }
   }

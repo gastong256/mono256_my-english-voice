@@ -37,12 +37,15 @@ force_commit_ms     = 180
 
 [tts]
 engine             = "piper"
+mode               = "interactive_balanced"
 model_path         = "models/en_US-lessac-medium.onnx"
 piper_data_path    = "models/en_US-lessac-medium.onnx.json"
 speaker_id         = 0
 gpu_enabled        = false
 output_sample_rate = 22050
 fallback_engine    = "espeak"
+preview_engine     = "espeak"
+max_primary_tts_budget_ms = 180
 
 [tts.pronunciation_hints]
 enabled    = true

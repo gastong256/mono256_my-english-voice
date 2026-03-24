@@ -19,6 +19,7 @@ add_library(mev STATIC
   pipeline/tts_scheduler.cpp
   tts/onnx_tts_stub.cpp
   tts/stub_tts_engine.cpp
+  tts/speech_chunker.cpp
   tts/piper_tts_engine.cpp
   tts/espeak_tts_engine.cpp
 )

@@ -8,6 +8,16 @@
 
 namespace mev {
 
+struct SpeechChunk {
+  SequenceNumber sequence{0};
+  TimePoint deadline_at{};
+  std::string text{};
+  bool is_partial{true};
+  bool is_final{false};
+  std::uint32_t sample_rate{0};
+  std::vector<float> mono_pcm{};
+};
+
 struct TtsRequest {
   SequenceNumber sequence{0};
   TimePoint enqueued_at{};

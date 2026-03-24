@@ -34,9 +34,17 @@ void StubTTSEngine::warmup() {
 }
 
 bool StubTTSEngine::synthesize(const std::string& text, std::vector<float>& pcm_out) {
+  SpeechChunk chunk;
+  chunk.text = text;
+  chunk.is_partial = false;
+  chunk.is_final = true;
+  return synthesize_chunk(chunk, pcm_out);
+}
+
+bool StubTTSEngine::synthesize_chunk(const SpeechChunk& chunk, std::vector<float>& pcm_out) {
   // ~1800 samples per word at configured sample rate — similar to OnnxTtsStub.
-  const std::size_t words = count_words(text);
-  const std::size_t num_samples = words * 1800U;
+  const std::size_t words = count_words(chunk.text);
+  const std::size_t num_samples = words * (chunk.is_partial ? 900U : 1800U);
 
   pcm_out.resize(num_samples);
 

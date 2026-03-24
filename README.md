@@ -477,6 +477,8 @@ TTS behavior today:
 
 - `piper` is the primary backend for `config/pipeline.windows.toml`
 - `espeak` remains the required fallback backend
+- `tts.mode = "interactive_balanced"` emits short speech chunks and falls back to the preview engine when the primary TTS budget is exceeded
+- `tts.mode = "interactive_preview"` treats `espeak` as the first-class low-latency live mode
 - if the primary TTS path fails during synthesis, the pipeline degrades and retries with `espeak`
 - `config/pipeline.windows.smoke.toml` uses `espeak` as both primary and fallback so the smoke preset does not require ONNX Runtime
 - `config/pipeline.windows.cuda.toml` requests GPU for both ASR and Piper so `--self-test` can report effective GPU/CPU placement on Windows

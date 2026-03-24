@@ -64,12 +64,15 @@ struct AsrConfig {
 // ---------------------------------------------------------------------------
 struct TtsConfig {
   std::string engine{"stub"};                         // "piper", "espeak", "stub"
+  std::string mode{"interactive_balanced"};          // "interactive_preview", "interactive_balanced"
   std::string model_path{"models/en_US-lessac-medium.onnx"};
   std::string piper_data_path{"models/en_US-lessac-medium.onnx.json"};
   std::uint32_t speaker_id{0};
   bool enable_gpu{true};
   std::uint32_t output_sample_rate{22050};
   std::string fallback_engine{"espeak"};
+  std::string preview_engine{"espeak"};
+  std::uint32_t max_primary_tts_budget_ms{180};
   bool pronunciation_hints_enabled{true};
   std::string hints_path{"config/pronunciation_hints.toml"};
   // Legacy compat fields

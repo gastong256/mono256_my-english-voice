@@ -24,10 +24,18 @@ void OnnxTtsStub::warmup() {
 }
 
 bool OnnxTtsStub::synthesize(const std::string& text, std::vector<float>& pcm_out) {
+  SpeechChunk chunk;
+  chunk.text = text;
+  chunk.is_partial = false;
+  chunk.is_final = true;
+  return synthesize_chunk(chunk, pcm_out);
+}
+
+bool OnnxTtsStub::synthesize_chunk(const SpeechChunk& chunk, std::vector<float>& pcm_out) {
   constexpr float two_pi = 6.28318530718F;
 
-  const auto words = 1U + static_cast<unsigned int>(std::count(text.begin(), text.end(), ' '));
-  const auto sample_count = static_cast<std::size_t>(words) * 1800U;
+  const auto words = 1U + static_cast<unsigned int>(std::count(chunk.text.begin(), chunk.text.end(), ' '));
+  const auto sample_count = static_cast<std::size_t>(words) * (chunk.is_partial ? 900U : 1800U);
   pcm_out.resize(sample_count, 0.0F);
 
   auto phase = static_cast<float>(phase_);

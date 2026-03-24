@@ -131,16 +131,21 @@ bool load_config_from_file(const std::string& path, AppConfig& config, std::stri
   // ---- [tts] --------------------------------------------------------------
   if (const auto* tts = tbl["tts"].as_table()) {
     config.tts.engine            = (*tts)["engine"].value_or(config.tts.engine);
+    config.tts.mode              = (*tts)["mode"].value_or(config.tts.mode);
     config.tts.model_path        = (*tts)["model_path"].value_or(config.tts.model_path);
     config.tts.piper_data_path   = (*tts)["piper_data_path"].value_or(config.tts.piper_data_path);
     config.tts.enable_gpu        = (*tts)["gpu_enabled"].value_or(
                                    (*tts)["enable_gpu"].value_or(config.tts.enable_gpu));
     config.tts.fallback_engine   = (*tts)["fallback_engine"].value_or(config.tts.fallback_engine);
+    config.tts.preview_engine    = (*tts)["preview_engine"].value_or(config.tts.preview_engine);
     if (const auto v = (*tts)["speaker_id"].value<int64_t>()) {
       config.tts.speaker_id = static_cast<std::uint32_t>(*v);
     }
     if (const auto v = (*tts)["output_sample_rate"].value<int64_t>()) {
       config.tts.output_sample_rate = static_cast<std::uint32_t>(*v);
+    }
+    if (const auto v = (*tts)["max_primary_tts_budget_ms"].value<int64_t>()) {
+      config.tts.max_primary_tts_budget_ms = static_cast<std::uint32_t>(*v);
     }
     // Sub-table [tts.pronunciation_hints]
     if (const auto* hints = (*tts)["pronunciation_hints"].as_table()) {
@@ -301,6 +306,12 @@ bool validate_config(const AppConfig& config, std::string& error) {
 
   if (config.asr.engine != "whisper") {
     error = "asr.engine must be 'whisper'";
+    return false;
+  }
+
+  if (config.tts.mode != "interactive_preview" &&
+      config.tts.mode != "interactive_balanced") {
+    error = "tts.mode must be one of: interactive_preview, interactive_balanced";
     return false;
   }
 

@@ -88,6 +88,8 @@ static void test_load_windows_pipeline_toml() {
          "Phase 5 Windows config must use Piper as the primary TTS backend");
   assert(cfg.tts.fallback_engine == "espeak" &&
          "Phase 5 Windows config must keep eSpeak as the fallback TTS backend");
+  assert(cfg.tts.mode == "interactive_balanced" &&
+         "Windows config must use interactive_balanced mode");
   assert(!cfg.asr.enable_gpu &&
          "Windows config must default to CPU-friendly ASR in the current phase");
   assert(cfg.audio.output_device == "CABLE Input" &&
@@ -130,6 +132,8 @@ static void test_load_windows_smoke_pipeline_toml() {
          "Windows smoke config must use eSpeak as the primary TTS backend");
   assert(cfg.tts.fallback_engine == "espeak" &&
          "Windows smoke config must keep eSpeak as the fallback backend");
+  assert(cfg.tts.mode == "interactive_preview" &&
+         "Windows smoke config must use interactive_preview mode");
   assert(cfg.runtime.run_duration_seconds == 3 &&
          "Windows smoke config should keep a short runtime by default");
 
@@ -175,6 +179,8 @@ static void test_load_windows_cuda_pipeline_toml() {
          "Windows CUDA config must use the low-latency ASR chunk size");
   assert(cfg.asr.hop_ms == 60 &&
          "Windows CUDA config must use the low-latency ASR hop size");
+  assert(cfg.tts.mode == "interactive_balanced" &&
+         "Windows CUDA config must use interactive_balanced mode");
 
   std::cout << "[PASS] test_load_windows_cuda_pipeline_toml (asr_gpu=" << cfg.asr.enable_gpu
             << " tts_gpu=" << cfg.tts.enable_gpu << ")\n";
