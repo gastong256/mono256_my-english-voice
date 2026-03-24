@@ -1,412 +1,349 @@
 # Windows 11 Runbook
 
-Guia operativa para clonar, preparar, validar y correr `my-english-voice` en Windows 11.
+Operational guide for setting up, validating, and running `my-english-voice` on Windows 11.
 
-Este documento esta pensado para:
+Covers: fresh checkout → dependency bootstrap → build → self-test → first runs → CUDA
+validation → latency benchmarking → conversational quality → end-to-end VB-Cable session.
 
-- un clone nuevo del repo en Windows
-- desarrollo y pruebas reales con microfono, TTS y VB-Cable
-- validacion del camino CPU primero y CUDA despues
+---
 
-## 1. Objetivo De Este Runbook
+## 1. Prerequisites
 
-Al terminar esta guia deberias poder:
+Complete all of these before running any repo script.
 
-1. preparar un host Windows 11 limpio
-2. clonar el repo en una ubicacion soportada
-3. bootstrapear dependencias y modelos
-4. compilar el binario Windows
-5. validar audio, ASR, TTS y CUDA con `--self-test`
-6. correr el modo `interactive_preview`
-7. correr el modo `interactive_balanced`
-8. ejecutar benchmarks locales de latencia
-9. probar el loop completo con VB-Cable en Meet / Zoom / Teams
+### 1.1 Toolchain
 
-## 2. Ubicacion Soportada Del Repo
+**Visual Studio 2022** (Community, Professional, or Build Tools) with the following workload
+components:
 
-Usa una ruta de Windows visible para ambos entornos:
-
-```text
-C:\dev\my-english-voice
-```
-
-Si ademas vas a usar WSL2, la ruta equivalente debe ser:
-
-```text
-/mnt/c/dev/my-english-voice
-```
-
-No uses:
-
-- `C:\Users\<usuario>\Downloads\...`
-- rutas con sincronizacion agresiva tipo OneDrive si puedes evitarlas
-- clones dentro de `/home/...` si luego vas a invocar wrappers WSL2 -> Windows
-
-## 3. Prerequisitos De Windows 11
-
-### 3.1 Requisitos Obligatorios
-
-Instala esto antes de correr scripts del repo:
-
-1. Windows 11 actualizado
-2. Visual Studio 2022 o Build Tools 2022
-3. workload de C++ con CMake tools
-4. Git for Windows
-5. PowerShell con policy local habilitada
-6. VB-Cable
-
-### 3.2 Visual Studio 2022
-
-Instala Visual Studio 2022 o Build Tools con soporte C++.
-
-Debes tener al menos:
-
-- MSVC v143
+- MSVC v143 (C++ compiler)
 - C++ CMake tools for Windows
-- Ninja
+- Ninja build system
 - Windows 10/11 SDK
 
-Verificacion recomendada en PowerShell:
+Verify in a **Developer PowerShell for VS 2022** (or any shell with `vcvars64.bat` sourced):
 
 ```powershell
-cmake --version
+cmake --version    # must be >= 3.25
 ninja --version
+cl               # MSVC compiler
 git --version
 ```
 
-### 3.3 PowerShell Execution Policy
+**Git for Windows** — required for repo operations and vcpkg bootstrap.
 
-Habilita scripts locales del proyecto:
+### 1.2 PowerShell execution policy
+
+Allow local project scripts to run:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-### 3.4 Driver GPU
+### 1.3 NVIDIA GPU driver
 
-Si vas a probar CUDA:
-
-1. instala driver NVIDIA actualizado
-2. reinicia Windows
-3. verifica desde PowerShell:
+Required only for the CUDA validation path. Skip if running CPU-only.
 
 ```powershell
 nvidia-smi
 ```
 
-Si `nvidia-smi` no funciona, no intentes validar el camino CUDA todavia.
+Expected output includes driver version and CUDA version. ONNX Runtime v1.22.0 requires
+**CUDA 12.x** driver support. If `nvidia-smi` fails, fix the driver before attempting any
+CUDA validation step.
 
-### 3.5 VB-Cable
+### 1.4 VB-Audio Virtual Cable
 
-Instala VB-Cable desde VB-Audio.
+Download from [vb-audio.com/Cable](https://vb-audio.com/Cable/) and install. Reboot if the
+installer requests it.
 
-Despues de instalarlo:
+After reboot, open **Sound Settings → Manage sound devices** and confirm these devices exist:
 
-1. reinicia si el instalador lo pide
-2. abre configuracion de sonido de Windows
-3. confirma que existen dispositivos parecidos a:
-   - `CABLE Input`
-   - `CABLE Output`
+- `CABLE Input` (playback device — the pipeline writes audio here)
+- `CABLE Output` (recording device — your video call app reads from here)
 
-## 4. Configuracion Recomendada De Audio En Windows
+Do not proceed to real-audio runs until both devices are visible.
 
-Antes de correr la app, revisa:
+### 1.5 Python 3.8+
 
-1. tu microfono real funciona en Windows
-2. VB-Cable aparece como dispositivo de entrada/salida
-3. en Propiedades de sonido desactiva mejoras agresivas si notas glitches
-4. si un dispositivo falla al abrirse, prueba con sample rates estandar del sistema antes de tocar el codigo
+Required only for benchmark regression checks and conversational quality evaluation.
+Not needed for the build or runtime.
 
-Consejo practico:
+---
 
-- la app busca nombres por substring
-- si `--list-devices both` muestra un nombre un poco distinto, usa ese substring exacto en `audio.output_device`
+## 2. Repo Checkout Location
 
-## 5. Clonado Del Repo En Windows
+The repo **must** live on a Windows-visible path. The bootstrap scripts validate this and
+will fail on unsupported paths.
 
-En PowerShell:
+Recommended:
 
-```powershell
-mkdir C:\dev -Force
-cd C:\dev
-git clone <URL_DEL_REPO> my-english-voice
-cd .\my-english-voice
+```text
+C:\dev\my-english-voice
 ```
 
-Si ya tienes el repo en Linux/WSL2, tambien puedes abrir exactamente esa misma ruta desde Windows mientras viva bajo `C:\dev\...`.
+If developing from WSL2, check out under a Windows-mounted drive and open via the mount:
 
-## 6. Bootstrap Del Entorno
+```text
+WSL2: /mnt/c/dev/my-english-voice
+```
 
-Desde la raiz del repo en PowerShell:
+Avoid:
+- Paths inside `C:\Users\<you>\Downloads\` or similar transient locations
+- OneDrive-synced folders (aggressive sync interferes with build artifacts)
+- Any path only visible from Linux (`/home/...`) when using WSL2→Windows wrappers
+
+---
+
+## 3. Bootstrap
+
+From the repo root in **PowerShell**:
 
 ```powershell
 .\scripts\windows\setup-dev.ps1
 ```
 
-Este script hace:
+This script:
 
-- prepara `vcpkg` en `.local\vcpkg`
-- instala paquetes nativos pinneados
-- descarga ONNX Runtime pinneado (actualmente v1.22.0 con soporte CUDA 12.x)
-- descarga modelos pinneados en `models\`:
-  - `ggml-small.bin` (Whisper small FP16, para GPU)
-  - `ggml-small-q5_1.bin` (Whisper small Q5_1, para CPU baseline)
-  - `ggml-tiny.bin` (Whisper tiny FP16)
-  - `ggml-tiny-q5_1.bin` (Whisper tiny Q5_1, para modo MINIMAL en CPU)
-  - `en_US-lessac-medium.onnx` + `.onnx.json` (Piper TTS)
-- escribe `.local\windows-dev-env.ps1`
+1. Clones (or reuses) `vcpkg` into `.local\vcpkg`
+2. Installs pinned vcpkg packages: `portaudio:x64-windows`, `libsamplerate:x64-windows`,
+   and optionally `espeak-ng:x64-windows`
+3. Downloads pinned ONNX Runtime (v1.22.0, GPU build) into `.local\onnxruntime\`
+4. Downloads pinned model weights into `models\`:
+   - `ggml-small.bin` — Whisper small FP16 (GPU inference)
+   - `ggml-small-q5_1.bin` — Whisper small Q5\_1 (CPU baseline, ~2x faster than FP16 on CPU)
+   - `ggml-tiny.bin` — Whisper tiny FP16 (GPU fallback)
+   - `ggml-tiny-q5_1.bin` — Whisper tiny Q5\_1 (MINIMAL degradation mode on CPU)
+   - `en_US-lessac-medium.onnx` + `.onnx.json` — Piper TTS voice model
+5. Writes `.local\windows-dev-env.ps1` with `VCPKG_ROOT` and `ONNXRUNTIME_ROOT`
 
-Resultado esperado:
-
-- no hay errores
-- ves un resumen final con `VCPKG_ROOT`, `ONNXRUNTIME_ROOT` y siguientes pasos
-
-Nota importante sobre eSpeak en Windows:
-
-- el repo intenta provisionarlo si la registry actual de `vcpkg` lo soporta
-- si el port no existe en tu entorno, `setup-dev.ps1` sigue adelante y te deja el resto del host listo
-- si necesitas `MEV_ENABLE_ESPEAK=ON` y vcpkg falla, instala eSpeak-ng manualmente:
-  1. descarga el installer desde `https://github.com/espeak-ng/espeak-ng/releases`
-  2. instala en la ruta por defecto (`C:\Program Files\eSpeak NG`)
-  3. antes de compilar: `$env:ESPEAK_ROOT = "C:\Program Files\eSpeak NG"`
-
-Carga luego el helper local:
+Source the environment helper after setup completes:
 
 ```powershell
 . .\.local\windows-dev-env.ps1
 ```
 
-## 7. Build Recomendado
+**eSpeak note:** `espeak-ng:x64-windows` is optional in the vcpkg manifest. If the active
+registry does not provide it, bootstrap continues and leaves the rest of the host ready.
+To enable eSpeak manually:
 
-### 7.1 Build Completo
+1. Download the installer from [espeak-ng releases](https://github.com/espeak-ng/espeak-ng/releases)
+2. Install to the default path (`C:\Program Files\eSpeak NG`)
+3. Before building: `$env:ESPEAK_ROOT = "C:\Program Files\eSpeak NG"`
+
+---
+
+## 4. Build
+
+### Full build (all backends, recommended for all real-hardware runs)
 
 ```powershell
 .\scripts\windows\build.ps1 -Preset windows-msvc-full
 ```
 
-Usa este preset para pruebas reales con:
+Enables: PortAudio, Whisper, ONNX Runtime/Piper, eSpeak, libsamplerate, WebRTC VAD, GPU.
 
-- PortAudio
-- Whisper
-- Piper
-- eSpeak
-- libsamplerate
-
-### 7.2 Build Smoke
-
-```powershell
-.\scripts\windows\build.ps1 -Preset windows-msvc-smoke
-```
-
-Usa este preset solo si quieres aislar problemas y validar el camino mas liviano.
-
-### 7.3 Build CI-Safe
-
-```powershell
-.\scripts\windows\build.ps1 -Preset windows-msvc-ci
-```
-
-Usa este preset si quieres reproducir el mismo contrato que usa GitHub Actions:
-
-- Whisper habilitado
-- benchmarks habilitados
-- sin dependencia de eSpeak en Windows
-
-### 7.4 Build GPU Debug (para depuracion de problemas CUDA)
+### GPU debug build (for diagnosing CUDA issues)
 
 ```powershell
 .\scripts\windows\build.ps1 -Preset windows-msvc-gpu-debug
 ```
 
-Usa este preset para depurar el camino GPU con simbolos de debug activos:
+Same backends as `windows-msvc-full` but compiled in Debug mode. Use when `--self-test`
+shows unexpected CPU fallback and you need to trace the failure path.
 
-- todos los backends habilitados (identico a `windows-msvc-full` en backends)
-- modo Debug — binario mas lento pero con informacion de debug completa
-- util cuando `--self-test` muestra fallback a CPU y necesitas rastrear el origen
+### Smoke build (lightweight, no ONNX Runtime)
 
-## 8. Validaciones Iniciales Obligatorias
+```powershell
+.\scripts\windows\build.ps1 -Preset windows-msvc-smoke
+```
 
-Haz estas pruebas en este orden.
+Useful for isolating audio and ASR problems without the Piper/ONNX dependency.
 
-### 8.1 Test Suite Windows
+### CI build (reproduces GitHub Actions contract)
+
+```powershell
+.\scripts\windows\build.ps1 -Preset windows-msvc-ci
+```
+
+Whisper + benchmarks enabled, no eSpeak dependency. Matches what the CI pipeline runs.
+
+---
+
+## 5. Validation Sequence
+
+Execute in this exact order. Do not skip steps.
+
+### 5.1 Unit and integration tests
 
 ```powershell
 .\scripts\windows\test.ps1 -Preset windows-msvc-full
 ```
 
-Resultado esperado:
+All tests must pass. A failure here indicates a build or dependency issue that will
+manifest at runtime. Fix before continuing.
 
-- `ctest` completo sin fallos
-
-### 8.2 Enumerar Dispositivos
-
-```powershell
-.\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.toml -AppArgs @('--list-devices','both')
-```
-
-Confirma:
-
-- aparece tu microfono real
-- aparece un dispositivo con nombre parecido a `CABLE Input`
-
-Si no aparece `CABLE Input`, no sigas con pruebas reales hasta resolver eso.
-
-### 8.3 Self-Test CPU Baseline
+### 5.2 Device enumeration
 
 ```powershell
-.\scripts\windows\self-test.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.preview.toml
+.\scripts\windows\run.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.toml `
+  -AppArgs @('--list-devices','both')
 ```
 
-Resultado esperado:
+Confirm:
+- Your physical microphone appears in the input device list
+- A device matching `CABLE Input` appears in the output device list
 
-- config valida
-- modelos presentes
-- backend de audio seleccionado correctamente
-- ASR y TTS inicializan
+If `CABLE Input` is absent, reinstall VB-Cable and reboot before proceeding.
 
-### 8.4 Self-Test Balanced
+### 5.3 Self-test — CPU baseline
 
 ```powershell
-.\scripts\windows\self-test.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.toml
+.\scripts\windows\self-test.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.preview.toml
 ```
 
-Resultado esperado:
+Expected: config valid, models found, audio backend selected, ASR (Whisper stub or real)
+and TTS (eSpeak) initialize without error.
 
-- Piper inicializa o, si algo falla, el motivo queda claro
-- eSpeak queda disponible como fallback
-
-### 8.5 Self-Test CUDA
+### 5.4 Self-test — balanced (Piper TTS)
 
 ```powershell
-.\scripts\windows\self-test.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.cuda.toml
+.\scripts\windows\self-test.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.toml
 ```
 
-Busca en el output:
+Expected: Piper TTS initializes with the ONNX Runtime CPU provider. If initialization
+fails, the error message will identify whether the model file is missing, the ONNX Runtime
+root is unset, or the session fails to load.
 
-- deteccion de GPU
-- visibilidad del runtime CUDA
-- requested vs effective placement para ASR y TTS
-
-Interpretacion:
-
-- si Whisper o Piper quedan en CPU con razon clara, el diagnostico esta funcionando
-- si el objetivo es validar CUDA, no lo des por bueno hasta ver placement efectivo en GPU
-
-## 9. Primera Corrida Segura
-
-Antes de ir al camino full, valida el modo de menor riesgo.
-
-### 9.1 Preview Real-Audio
+### 5.5 Self-test — CUDA placement validation
 
 ```powershell
-.\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.preview.toml -AppArgs @('--runtime.run_duration_seconds','20')
+.\scripts\windows\self-test.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.cuda.toml
 ```
 
-Este modo usa:
+Look for these lines in the output:
 
-- ASR en baseline CPU (Whisper small Q5_1)
-- eSpeak como engine principal
-- politica de menor latencia
+```
+[INFO] ASR requested_device=cuda effective=cuda
+[INFO] TTS requested_device=cuda effective=cuda
+[INFO] CUDA driver visible: true
+[INFO] onnxruntime_providers_cuda.dll visible: true
+```
 
-Que debes observar:
+If either backend shows `effective=cpu` with a reason, address it before running the CUDA
+production config. The most common causes are listed in the troubleshooting section.
 
-- no crashea
-- abre microfono real
-- emite logs `[METRICS]`
-- no hay underruns o drops descontrolados
+---
 
-### 9.2 Balanced Real-Audio
+## 6. First Runs
+
+Progress from least risk to most risk.
+
+### 6.1 Preview mode (eSpeak TTS, lowest latency)
 
 ```powershell
-.\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.toml -AppArgs @('--runtime.run_duration_seconds','20')
+.\scripts\windows\run.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.preview.toml `
+  -AppArgs @('--runtime.run_duration_seconds','20')
 ```
 
-Este modo intenta el camino principal:
+- ASR: Whisper small Q5\_1 on CPU
+- TTS: eSpeak (synthesizes immediately, no ONNX overhead)
+- Expected latency: TTFA ≤ 450 ms p50
 
-- Whisper translate (Whisper small Q5_1)
-- Piper como TTS principal
-- fallback a eSpeak si hace falta
+Observe in the console during the 20-second run:
 
-Que debes observar:
+```
+[INFO] pipeline running — input=portaudio_input asr=whisper.cpp tts=espeak mode=NORMAL
+[INFO] [HEALTH] mode=NORMAL asr_q=1/32 tts_q=0/8 overruns=0 underruns=0 drops=0
+[INFO] [METRICS] utterance_id=3 total_ms=380.1 asr_ms=290.4 tts_ms=62.1 speech_chunks=2
+```
 
-- el run arranca y completa
-- hay `speech_chunks` en logs
-- si Piper excede presupuesto, ves preview/fallback pero el sistema sigue respondiendo
+Flag as failing if: crash, persistent `output_underruns` > 200, `queue_drops` > 0.
 
-### 9.3 CUDA Real-Audio
-
-Haz esto solo despues de validar preview y balanced sin CUDA:
+### 6.2 Balanced mode (Piper TTS, production quality)
 
 ```powershell
-.\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.cuda.toml -AppArgs @('--runtime.run_duration_seconds','20')
+.\scripts\windows\run.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.toml `
+  -AppArgs @('--runtime.run_duration_seconds','20')
 ```
 
-### 9.4 Produccion CPU (runtime indefinido)
+- ASR: Whisper small Q5\_1 on CPU
+- TTS: Piper ONNX on CPU, eSpeak fallback when primary budget exceeded
+- Expected latency: TTFA ≤ 650 ms p50
 
-Una vez validado el camino completo, usa el config de produccion para sesiones reales:
+### 6.3 CUDA mode (GPU acceleration)
+
+Only run after 6.1 and 6.2 complete cleanly.
 
 ```powershell
-.\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.production.toml
+.\scripts\windows\run.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.cuda.toml `
+  -AppArgs @('--runtime.run_duration_seconds','20')
 ```
 
-Este config tiene `run_duration_seconds = 0` que significa **correr hasta CTRL+C**.
-Usa `config/pipeline.windows.cuda.production.toml` para la variante GPU.
+- ASR: Whisper small FP16 on CUDA
+- TTS: Piper ONNX on CUDA
+- Expected: `mode=NORMAL`, `asr_ms` significantly lower than CPU baseline
 
-### 9.5 VAD Real-Audio (opcional, para comparacion de latencia)
+Confirm GPU is active in logs:
+
+```
+[INFO] pipeline running — input=portaudio_input asr=whisper.cpp[cuda:0] tts=piper[cuda:0]
+```
+
+### 6.4 Production runs (infinite runtime)
+
+After all short runs pass, switch to the production configs which run until `Ctrl+C`:
 
 ```powershell
-.\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.webrtcvad.toml
+# CPU production
+.\scripts\windows\run.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.production.toml
+
+# CUDA production
+.\scripts\windows\run.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.cuda.production.toml
 ```
 
-Con VAD habilitado, el ASR solo recibe audio cuando hay voz detectada, reduciendo
-inferencias innecesarias en silencio. Compara `asr_q` en `[HEALTH]` logs vs. el config sin VAD.
+Stop with `Ctrl+C`. Expect:
 
-## 10. Pruebas Manuales Reales De Conversacion
+```
+[INFO] SIGINT/SIGTERM received — shutting down
+[INFO] shutdown metrics queue_drops=0 output_underruns=... stale_cancelled=...
+```
 
-Una vez que los runs cortos funcionan:
+---
 
-1. deja `config/pipeline.windows.preview.toml` para priorizar baja latencia
-2. habla frases cortas de dominio tecnico
-3. verifica que el ingles sea entendible, aunque no sea nativo
+## 7. Latency Benchmarking
 
-Frases recomendadas:
-
-- `necesitamos revisar la base de datos antes del release`
-- `el deploy fallo por una variable de entorno faltante`
-- `puedes reiniciar el servicio y revisar los logs`
-- `la latencia subio despues del cambio en la API`
-- `hay que validar la migracion de PostgreSQL en produccion`
-
-Que evaluar:
-
-- meaning preserved
-- terminos tecnicos conservados
-- claridad para dialogo corto
-- tiempo hasta primer audio
-
-## 11. Benchmark De Latencia
-
-### 11.1 Benchmark Local
+### 7.1 Run the benchmark
 
 ```powershell
 .\scripts\windows\benchmark-latency.ps1 -BuildFirst
 ```
 
-Esto genera artefactos en:
+Artifacts are written to `artifacts\benchmarks\<timestamp>\`. The benchmark runs:
 
-```text
-artifacts\benchmarks\<timestamp>\
-```
+1. A synthetic scheduler simulation (`benchmark_pipeline_latency`)
+2. A short real-app session for `interactive_preview` mode
+3. A short real-app session for `interactive_balanced` mode
 
-### 11.2 Benchmark Con Audio Simulado
-
-Si quieres aislar problemas de dispositivos:
+### 7.2 With simulated audio (isolates device variability)
 
 ```powershell
-.\scripts\windows\benchmark-latency.ps1 -BuildFirst -AppArgs @('--runtime.use_simulated_audio','true')
+.\scripts\windows\benchmark-latency.ps1 `
+  -AppArgs @('--runtime.use_simulated_audio','true')
 ```
 
-### 11.3 Validar Guardrails
+Use this when comparing across machines or when device jitter is suspected.
+
+### 7.3 Validate against guardrails
 
 ```powershell
 python .\scripts\check_realtime_regressions.py `
@@ -414,209 +351,206 @@ python .\scripts\check_realtime_regressions.py `
   --latency-thresholds benchmarks\regression_thresholds.json
 ```
 
-Objetivos actuales:
+Current acceptance thresholds:
 
-- `interactive_preview`: `TTFA_audio_p50 <= 450 ms`
-- `interactive_balanced`: `TTFA_audio_p50 <= 650 ms`
+| Mode | TTFA audio p50 |
+|------|---------------|
+| `interactive_preview` | ≤ 450 ms |
+| `interactive_balanced` | ≤ 650 ms |
 
-## 12. Validacion Conversacional
+Exit code 0 means all guardrails pass. Archive the accepted `summary.json` as the first
+validated benchmark:
 
-Cuando ya tengas una corrida real con predicciones exportadas:
+```powershell
+mkdir benchmarks\validated -Force
+cp artifacts\benchmarks\<timestamp>\summary.json benchmarks\validated\windows-first-run.json
+```
 
-1. genera o guarda `prediction_en` por sample
-2. usa `eval/domain_realtime_set.jsonl`
-3. emite CSV de revision
-4. completa revision manual
-5. compara contra thresholds de calidad
+---
 
-Comandos:
+## 8. Conversational Quality Evaluation
+
+### 8.1 Collect predictions
+
+Run a session where you speak each Spanish sentence from `eval/domain_realtime_set.jsonl`
+into the microphone. Capture the `translated_text` field from log lines matching
+`[METRICS] utterance_id=...` and write them to:
+
+```text
+eval\predictions_v1.jsonl
+```
+
+Format per line: `{"id": "<sample_id>", "prediction_en": "<translated text>"}`
+
+### 8.2 Score and generate review CSV
 
 ```powershell
 python .\eval\score_domain_eval.py `
   --dataset .\eval\domain_realtime_set.jsonl `
-  --predictions .\eval\your_predictions.jsonl `
-  --emit-review-csv .\eval\manual_review.csv
+  --predictions .\eval\predictions_v1.jsonl `
+  --emit-review-csv .\eval\manual_review_v1.csv
 ```
 
-Luego de revisar el CSV:
+### 8.3 Manual labeling
+
+Open `eval\manual_review_v1.csv` and rate each row following `eval\LABELING.md`.
+Quality labels: `A` (native-equivalent), `B2` (good), `B1` (acceptable), `B0` (broken).
+
+### 8.4 Compute summary and validate
 
 ```powershell
 python .\eval\score_domain_eval.py `
   --dataset .\eval\domain_realtime_set.jsonl `
-  --predictions .\eval\your_predictions.jsonl `
-  --manual-labels .\eval\manual_review.csv `
-  --summary-out .\eval\manual_review_summary.json
-```
+  --predictions .\eval\predictions_v1.jsonl `
+  --manual-labels .\eval\manual_review_v1.csv `
+  --summary-out .\eval\manual_review_summary_v1.json
 
-Y compara contra guardrails:
-
-```powershell
 python .\scripts\check_realtime_regressions.py `
-  --quality-summary .\eval\manual_review_summary.json `
+  --quality-summary .\eval\manual_review_summary_v1.json `
   --quality-thresholds .\eval\conversational_thresholds.json
 ```
 
-## 13. Prueba End-To-End Con VB-Cable
+Acceptance criteria:
 
-### 13.1 Configuracion De La App
+| Metric | Threshold |
+|--------|-----------|
+| `manual_b1_or_better_rate` | ≥ 0.85 |
+| `manual_b2_or_better_rate` | ≥ 0.60 |
 
-Usa como baseline:
+Archive the accepted summary:
 
-- `config/pipeline.windows.preview.toml` para latencia minima
-- `config/pipeline.windows.toml` para modo principal balanceado
-
-Verifica que en el TOML:
-
-```toml
-[audio]
-output_device = "CABLE Input"
+```powershell
+cp .\eval\manual_review_summary_v1.json .\eval\baseline_v1.json
 ```
 
-### 13.2 Configuracion De La Videollamada
+---
 
-En Meet / Zoom / Teams:
+## 9. End-to-End VB-Cable Validation
 
-1. deja tu microfono real seleccionado dentro de la app `my-english-voice`
-2. en la app de videollamada selecciona `CABLE Output` como microfono
-3. habla por tu microfono fisico
-4. confirma que la videollamada recibe la voz sintetizada y no tu voz cruda
+### 9.1 Pipeline configuration
 
-### 13.3 Prueba Recomendada
+All production configs have `output_device = "CABLE Input"` pre-set. Confirm with:
 
-Haz primero una llamada de prueba o grabacion local.
+```powershell
+.\scripts\windows\run.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.cuda.production.toml `
+  -AppArgs @('--list-devices','both')
+```
 
-Valida:
+The device name is matched by substring. If your VB-Cable appears as `CABLE Input (VB-Audio
+Virtual Cable)`, the substring `CABLE Input` will still match.
 
-- se oye audio sintetizado
-- la latencia es tolerable
-- no hay cortes largos
-- el interlocutor entiende frases tecnicas cortas
+### 9.2 Video call application setup
 
-## 14. Orden Recomendado De Validacion
+In Google Meet / Zoom / Microsoft Teams:
 
-No saltees este orden:
+1. Open audio settings
+2. Set the **microphone** to **CABLE Output** (not your physical mic)
+3. Keep your physical mic as the input **inside the pipeline app**
 
-1. `setup-dev.ps1`
-2. `build.ps1 -Preset windows-msvc-full`
-3. `test.ps1`
-4. `--list-devices both`
-5. `self-test` preview
-6. `self-test` balanced
-7. `self-test` CUDA
-8. run preview real-audio (20s)
-9. run balanced real-audio (20s)
-10. run CUDA real-audio (20s)
-11. run production CPU (CTRL+C para parar)
-12. run production CUDA (CTRL+C para parar)
-13. run VAD (opcional, comparacion de latencia)
-14. benchmark local
-15. validacion con VB-Cable
-16. validacion conversacional manual
+Flow: physical mic → pipeline → VB-Cable Input → VB-Cable Output → video call app.
 
-## 15. Troubleshooting Rapido
+### 9.3 Test procedure
 
-### 15.1 `RepoRoot must be a Windows path`
+1. Start a test call (self-call, Google Meet preview, or Zoom test)
+2. Launch the pipeline:
+   ```powershell
+   .\scripts\windows\run.ps1 -Preset windows-msvc-full `
+     -ConfigPath config/pipeline.windows.cuda.production.toml
+   ```
+3. Speak a Spanish sentence
+4. Confirm the call receives synthesized English audio (not your raw voice)
+5. Observe pipeline logs for `[METRICS]` lines confirming completed utterances
 
-Estas corriendo un script Windows desde una ruta no soportada.
+---
 
-Solucion:
+## 10. Troubleshooting
 
-- mueve el repo a `C:\dev\my-english-voice`
+### `RepoRoot must be a Windows path`
 
-### 15.2 `ASR model path not found`
+The bootstrap script detected a non-Windows path. Move the repo to `C:\dev\my-english-voice`
+and re-run from there.
 
-Faltan modelos en `models\`.
+### `ASR model path not found`
 
-Solucion:
+Models are missing from `models\`. Re-run:
 
-- rerun `.\scripts\windows\setup-dev.ps1`
+```powershell
+.\scripts\windows\setup-dev.ps1
+```
 
-### 15.3 `Executable not found`
+### `Executable not found`
 
-No compilaste el preset pedido.
-
-Solucion:
+The requested preset has not been built. Build it first:
 
 ```powershell
 .\scripts\windows\build.ps1 -Preset windows-msvc-full
 ```
 
-### 15.4 `CABLE Input` no aparece
+### `CABLE Input` not visible in device list
 
-VB-Cable no esta instalado o Windows no lo expone todavia.
+VB-Cable is not installed or the device is not yet registered by Windows.
 
-Solucion:
+1. Reinstall VB-Cable
+2. Reboot
+3. Re-run `--list-devices both`
 
-- reinstalar VB-Cable
-- reiniciar Windows
-- volver a correr `--list-devices both`
+### Self-test reports `effective=cpu` for CUDA backends
 
-### 15.5 Self-test cae a CPU
+Ordered diagnostic steps:
 
-El diagnostico de CUDA o de ONNX Runtime esta detectando una degradacion.
-
-Revision:
-
-- `nvidia-smi`
-- driver NVIDIA
-- output de `--self-test --config config/pipeline.windows.cuda.toml`
-- visibilidad de `onnxruntime_providers_cuda.dll`
-
-### 15.6 ONNX Runtime CUDA no carga (`onnxruntime_providers_cuda.dll` no visible)
-
-El self-test reporta `requested_device=gpu effective=cpu` para Piper.
-
-Posibles causas y revision:
-
-1. **Version mismatch**: ONNX Runtime v1.22.0 requiere CUDA 12.x. Verifica con `nvidia-smi` que el
-   driver soporta CUDA 12.x o superior
-2. **DLL no encontrado**: verifica que `ONNXRUNTIME_ROOT` apunta al directorio correcto:
+1. `nvidia-smi` — confirms driver is functional and CUDA version is 12.x+
+2. Check `ONNXRUNTIME_ROOT` points to the correct directory:
    ```powershell
    ls $env:ONNXRUNTIME_ROOT\lib\onnxruntime_providers_cuda.dll
    ```
-3. **Driver desactualizado**: actualiza el driver NVIDIA al mas reciente y reinicia
-4. **Visual C++ Redistributable**: asegurate de tener instalado el VC++ 2022 Redistributable
+3. Update NVIDIA driver to the latest Game Ready or Studio release
+4. Confirm Visual C++ 2022 Redistributable is installed
+5. Re-run self-test with the debug build for a more detailed error trace:
+   ```powershell
+   .\scripts\windows\self-test.ps1 -Preset windows-msvc-gpu-debug `
+     -ConfigPath config/pipeline.windows.cuda.toml
+   ```
 
-Si el problema persiste, el pipeline cae a CPU automaticamente gracias a `gpu_failure_action = "fallback_cpu"` en el config.
+The pipeline falls back to CPU automatically via `gpu_failure_action = "fallback_cpu"`.
+CUDA is not required for the pipeline to function — only for meeting the low-latency targets.
 
-### 15.7 Audio entrecortado
+### Audio glitches or gaps
 
-Primero aísla si el problema es de dispositivo o de pipeline.
+Isolate device vs. pipeline:
 
-Prueba en este orden:
+```powershell
+# Run with simulated audio to remove device from the equation
+.\scripts\windows\run.ps1 -Preset windows-msvc-full `
+  -ConfigPath config/pipeline.windows.production.toml `
+  -AppArgs @('--runtime.use_simulated_audio','true','--runtime.run_duration_seconds','30')
+```
 
-1. corre benchmark o run con `--runtime.use_simulated_audio true`
-2. prueba `config/pipeline.windows.preview.toml`
-3. revisa logs de `[METRICS]`
-4. confirma que `queue_drops` y `output_underruns` no se disparan
+If simulated audio is clean, the issue is device-side:
 
-## 16. Criterio Practico De Exito
+- Disable audio enhancements in Windows Sound Properties for both input and output devices
+- Set VB-Cable sample rate to 16000 Hz or 44100 Hz (match the pipeline config)
+- Check `output_underruns` in `[HEALTH]` logs — high values indicate the TTS queue is not
+  being filled fast enough (CPU too slow → use CUDA config)
 
-Puedes considerar el host Windows "listo" si se cumple todo esto:
+---
 
-1. `setup-dev.ps1` termina sin errores
-2. `windows-msvc-full` compila
-3. `test.ps1` pasa
-4. `--list-devices both` muestra microfono real y VB-Cable
-5. `self-test` preview y balanced pasan
-6. `self-test` CUDA al menos diagnostica correctamente el placement
-7. `run.ps1` con preview y balanced completa una sesion corta sin crash
-8. `benchmark-latency.ps1` produce `summary.json`
-9. la videollamada recibe audio por `CABLE Output`
+## 11. Success Criteria
 
-## 17. Estado Esperado Hoy
+The Windows host is production-ready when all of the following hold:
 
-Hoy el repo ya deberia permitir:
-
-- bootstrap y build en Windows 11
-- validacion previa con `self-test`
-- run real con configs Windows
-- benchmark local de latencia
-- pruebas manuales con VB-Cable
-
-Lo que todavia debes confirmar en tu maquina:
-
-- numeros reales de latencia
-- calidad conversacional `B1/B2`
-- camino positivo CUDA para Whisper y Piper
-- estabilidad end-to-end en la app de videollamadas que uses
+| Check | Command | Expected result |
+|-------|---------|-----------------|
+| Bootstrap | `setup-dev.ps1` | Completes without error |
+| Build | `build.ps1 -Preset windows-msvc-full` | Exit 0 |
+| Tests | `test.ps1 -Preset windows-msvc-full` | 100% pass |
+| Devices | `--list-devices both` | Physical mic + CABLE Input visible |
+| Self-test CPU | `self-test.ps1 ... preview.toml` | PASS |
+| Self-test balanced | `self-test.ps1 ... windows.toml` | PASS |
+| Self-test CUDA | `self-test.ps1 ... cuda.toml` | Both backends `effective=cuda` |
+| Preview run | 20s run with preview config | No crash, TTFA visible in logs |
+| Balanced run | 20s run with windows.toml | `speech_chunks` in METRICS logs |
+| CUDA run | 20s run with cuda.toml | `asr=whisper.cpp[cuda:0]` in logs |
+| Benchmark | `benchmark-latency.ps1` | `summary.json` produced |
+| Guardrails | `check_realtime_regressions.py` | Exit 0 |
+| VB-Cable | Video call receives audio | Synthesized English, not raw voice |
