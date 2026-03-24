@@ -147,8 +147,13 @@ Este script hace:
 
 - prepara `vcpkg` en `.local\vcpkg`
 - instala paquetes nativos pinneados
-- descarga ONNX Runtime pinneado
-- descarga modelos pinneados en `models\`
+- descarga ONNX Runtime pinneado (actualmente v1.22.0 con soporte CUDA 12.x)
+- descarga modelos pinneados en `models\`:
+  - `ggml-small.bin` (Whisper small FP16, para GPU)
+  - `ggml-small-q5_1.bin` (Whisper small Q5_1, para CPU baseline)
+  - `ggml-tiny.bin` (Whisper tiny FP16)
+  - `ggml-tiny-q5_1.bin` (Whisper tiny Q5_1, para modo MINIMAL en CPU)
+  - `en_US-lessac-medium.onnx` + `.onnx.json` (Piper TTS)
 - escribe `.local\windows-dev-env.ps1`
 
 Resultado esperado:
@@ -160,7 +165,10 @@ Nota importante sobre eSpeak en Windows:
 
 - el repo intenta provisionarlo si la registry actual de `vcpkg` lo soporta
 - si el port no existe en tu entorno, `setup-dev.ps1` sigue adelante y te deja el resto del host listo
-- en ese caso, para builds con `MEV_ENABLE_ESPEAK=ON` debes provisionar `ESPEAK_ROOT` manualmente o usar un preset sin eSpeak
+- si necesitas `MEV_ENABLE_ESPEAK=ON` y vcpkg falla, instala eSpeak-ng manualmente:
+  1. descarga el installer desde `https://github.com/espeak-ng/espeak-ng/releases`
+  2. instala en la ruta por defecto (`C:\Program Files\eSpeak NG`)
+  3. antes de compilar: `$env:ESPEAK_ROOT = "C:\Program Files\eSpeak NG"`
 
 Carga luego el helper local:
 
@@ -203,6 +211,18 @@ Usa este preset si quieres reproducir el mismo contrato que usa GitHub Actions:
 - Whisper habilitado
 - benchmarks habilitados
 - sin dependencia de eSpeak en Windows
+
+### 7.4 Build GPU Debug (para depuracion de problemas CUDA)
+
+```powershell
+.\scripts\windows\build.ps1 -Preset windows-msvc-gpu-debug
+```
+
+Usa este preset para depurar el camino GPU con simbolos de debug activos:
+
+- todos los backends habilitados (identico a `windows-msvc-full` en backends)
+- modo Debug — binario mas lento pero con informacion de debug completa
+- util cuando `--self-test` muestra fallback a CPU y necesitas rastrear el origen
 
 ## 8. Validaciones Iniciales Obligatorias
 
@@ -284,7 +304,7 @@ Antes de ir al camino full, valida el modo de menor riesgo.
 
 Este modo usa:
 
-- ASR en baseline CPU
+- ASR en baseline CPU (Whisper small Q5_1)
 - eSpeak como engine principal
 - politica de menor latencia
 
@@ -303,7 +323,7 @@ Que debes observar:
 
 Este modo intenta el camino principal:
 
-- Whisper translate
+- Whisper translate (Whisper small Q5_1)
 - Piper como TTS principal
 - fallback a eSpeak si hace falta
 
@@ -320,6 +340,26 @@ Haz esto solo despues de validar preview y balanced sin CUDA:
 ```powershell
 .\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.cuda.toml -AppArgs @('--runtime.run_duration_seconds','20')
 ```
+
+### 9.4 Produccion CPU (runtime indefinido)
+
+Una vez validado el camino completo, usa el config de produccion para sesiones reales:
+
+```powershell
+.\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.production.toml
+```
+
+Este config tiene `run_duration_seconds = 0` que significa **correr hasta CTRL+C**.
+Usa `config/pipeline.windows.cuda.production.toml` para la variante GPU.
+
+### 9.5 VAD Real-Audio (opcional, para comparacion de latencia)
+
+```powershell
+.\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.webrtcvad.toml
+```
+
+Con VAD habilitado, el ASR solo recibe audio cuando hay voz detectada, reduciendo
+inferencias innecesarias en silencio. Compara `asr_q` en `[HEALTH]` logs vs. el config sin VAD.
 
 ## 10. Pruebas Manuales Reales De Conversacion
 
@@ -463,12 +503,15 @@ No saltees este orden:
 5. `self-test` preview
 6. `self-test` balanced
 7. `self-test` CUDA
-8. run preview real-audio
-9. run balanced real-audio
-10. run CUDA real-audio
-11. benchmark local
-12. validacion con VB-Cable
-13. validacion conversacional manual
+8. run preview real-audio (20s)
+9. run balanced real-audio (20s)
+10. run CUDA real-audio (20s)
+11. run production CPU (CTRL+C para parar)
+12. run production CUDA (CTRL+C para parar)
+13. run VAD (opcional, comparacion de latencia)
+14. benchmark local
+15. validacion con VB-Cable
+16. validacion conversacional manual
 
 ## 15. Troubleshooting Rapido
 
@@ -519,7 +562,24 @@ Revision:
 - output de `--self-test --config config/pipeline.windows.cuda.toml`
 - visibilidad de `onnxruntime_providers_cuda.dll`
 
-### 15.6 Audio entrecortado
+### 15.6 ONNX Runtime CUDA no carga (`onnxruntime_providers_cuda.dll` no visible)
+
+El self-test reporta `requested_device=gpu effective=cpu` para Piper.
+
+Posibles causas y revision:
+
+1. **Version mismatch**: ONNX Runtime v1.22.0 requiere CUDA 12.x. Verifica con `nvidia-smi` que el
+   driver soporta CUDA 12.x o superior
+2. **DLL no encontrado**: verifica que `ONNXRUNTIME_ROOT` apunta al directorio correcto:
+   ```powershell
+   ls $env:ONNXRUNTIME_ROOT\lib\onnxruntime_providers_cuda.dll
+   ```
+3. **Driver desactualizado**: actualiza el driver NVIDIA al mas reciente y reinicia
+4. **Visual C++ Redistributable**: asegurate de tener instalado el VC++ 2022 Redistributable
+
+Si el problema persiste, el pipeline cae a CPU automaticamente gracias a `gpu_failure_action = "fallback_cpu"` en el config.
+
+### 15.7 Audio entrecortado
 
 Primero aísla si el problema es de dispositivo o de pipeline.
 

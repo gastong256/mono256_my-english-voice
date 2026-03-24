@@ -108,6 +108,20 @@
         "MEV_ENABLE_WHISPER_CPP": "ON",
         "MEV_BUILD_BENCHMARKS": "ON"
       }
+    },
+    {
+      "name": "windows-msvc-gpu-debug",
+      "inherits": ["windows-msvc-debug"],
+      "cacheVariables": {
+        "MEV_ENABLE_GPU": "ON",
+        "MEV_ENABLE_PORTAUDIO": "ON",
+        "MEV_ENABLE_WHISPER_CPP": "ON",
+        "MEV_ENABLE_ONNXRUNTIME": "ON",
+        "MEV_ENABLE_ESPEAK": "ON",
+        "MEV_ENABLE_LIBSAMPLERATE": "ON",
+        "MEV_ENABLE_WEBRTCVAD": "ON",
+        "ONNXRUNTIME_ROOT": "$penv{ONNXRUNTIME_ROOT}"
+      }
     }
   ],
   "buildPresets": [
@@ -142,6 +156,10 @@
     {
       "name": "windows-msvc-ci",
       "configurePreset": "windows-msvc-ci"
+    },
+    {
+      "name": "windows-msvc-gpu-debug",
+      "configurePreset": "windows-msvc-gpu-debug"
     }
   ],
   "testPresets": [
@@ -176,6 +194,13 @@
     {
       "name": "windows-msvc-ci",
       "configurePreset": "windows-msvc-ci",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-gpu-debug",
+      "configurePreset": "windows-msvc-gpu-debug",
       "output": {
         "outputOnFailure": true
       }

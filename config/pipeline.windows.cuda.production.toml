@@ -1,6 +1,8 @@
 # =============================================================================
-# VoicePipeline — Windows interactive preview configuration
-# Real audio, low buffering, and eSpeak-first live mode.
+# VoicePipeline — Windows CUDA production configuration
+# Real audio, Whisper GPU F16, Piper GPU, infinite runtime.
+# Use with: .\scripts\windows\run.ps1 -ConfigPath config/pipeline.windows.cuda.production.toml
+# Requires: NVIDIA GPU, CUDA driver, windows-msvc-full or windows-msvc-gpu-debug preset.
 # =============================================================================
 
 [audio]
@@ -22,12 +24,12 @@ trailing_pad_ms       = 300
 
 [asr]
 engine              = "whisper"
-model_path          = "models/ggml-small-q5_1.bin"
+model_path          = "models/ggml-small.bin"
 language            = "es"
 translate           = true
 beam_size           = 1
-gpu_enabled         = false
-quantization        = "q5_1"
+gpu_enabled         = true
+quantization        = "f16"
 use_domain_prompt   = true
 max_context_tokens  = 224
 chunk_ms            = 120
@@ -36,16 +38,16 @@ stability_threshold = 0.65
 force_commit_ms     = 180
 
 [tts]
-engine             = "espeak"
-mode               = "interactive_preview"
+engine             = "piper"
+mode               = "interactive_balanced"
 model_path         = "models/en_US-lessac-medium.onnx"
 piper_data_path    = "models/en_US-lessac-medium.onnx.json"
 speaker_id         = 0
-gpu_enabled        = false
+gpu_enabled        = true
 output_sample_rate = 22050
 fallback_engine    = "espeak"
 preview_engine     = "espeak"
-max_primary_tts_budget_ms = 120
+max_primary_tts_budget_ms = 180
 
 [tts.pronunciation_hints]
 enabled    = true
@@ -66,17 +68,17 @@ asr_to_text_capacity   = 32
 text_to_tts_capacity   = 32
 
 [gpu]
-enabled                        = false
+enabled                        = true
 device_id                      = 0
 asr_priority                   = true
 tts_cpu_fallback_on_contention = true
 
 [domain]
-glossary_path            = "config/tech_glossary.toml"
-session_terms_enabled    = true
-pronunciation_hints      = true
+glossary_path           = "config/tech_glossary.toml"
+session_terms_enabled   = true
+pronunciation_hints     = true
 pronunciation_hints_path = "config/pronunciation_hints.toml"
-initial_prompt_template  = "Technical meeting about {topics}. Use simple English."
+initial_prompt_template = "Technical meeting about {topics}. Use simple English."
 
 [resilience]
 enable_degradation           = true
@@ -85,7 +87,7 @@ passthrough_on_total_failure = true
 
 [logging]
 level   = "info"
-file    = "logs/pipeline-windows-preview.log"
+file    = "logs/pipeline-windows-cuda-production.log"
 console = true
 async   = true
 
@@ -96,4 +98,4 @@ log_per_utterance  = true
 
 [runtime]
 use_simulated_audio  = false
-run_duration_seconds = 20
+run_duration_seconds = 0

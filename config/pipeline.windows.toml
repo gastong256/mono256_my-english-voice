@@ -22,7 +22,7 @@ trailing_pad_ms       = 300
 
 [asr]
 engine              = "whisper"
-model_path          = "models/ggml-small.bin"
+model_path          = "models/ggml-small-q5_1.bin"
 language            = "es"
 translate           = true
 beam_size           = 1

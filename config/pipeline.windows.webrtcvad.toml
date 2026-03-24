@@ -1,6 +1,10 @@
 # =============================================================================
-# VoicePipeline — Windows interactive preview configuration
-# Real audio, low buffering, and eSpeak-first live mode.
+# VoicePipeline — Windows production + WebRTC VAD
+# Same as pipeline.windows.production.toml but with libfvad voice activity
+# detection to suppress silence from reaching the ASR engine.
+# Requires: windows-msvc-full or windows-msvc-gpu-debug preset
+#           (MEV_ENABLE_WEBRTCVAD=ON).
+# Use with: .\scripts\windows\run.ps1 -ConfigPath config/pipeline.windows.webrtcvad.toml
 # =============================================================================
 
 [audio]
@@ -13,7 +17,7 @@ input_ring_capacity  = 16384
 output_ring_capacity = 1024
 
 [vad]
-engine                = "none"
+engine                = "webrtcvad"
 threshold             = 0.5
 silence_duration_ms   = 300
 max_chunk_duration_ms = 3000
@@ -36,8 +40,8 @@ stability_threshold = 0.65
 force_commit_ms     = 180
 
 [tts]
-engine             = "espeak"
-mode               = "interactive_preview"
+engine             = "piper"
+mode               = "interactive_balanced"
 model_path         = "models/en_US-lessac-medium.onnx"
 piper_data_path    = "models/en_US-lessac-medium.onnx.json"
 speaker_id         = 0
@@ -45,7 +49,7 @@ gpu_enabled        = false
 output_sample_rate = 22050
 fallback_engine    = "espeak"
 preview_engine     = "espeak"
-max_primary_tts_budget_ms = 120
+max_primary_tts_budget_ms = 180
 
 [tts.pronunciation_hints]
 enabled    = true
@@ -72,11 +76,11 @@ asr_priority                   = true
 tts_cpu_fallback_on_contention = true
 
 [domain]
-glossary_path            = "config/tech_glossary.toml"
-session_terms_enabled    = true
-pronunciation_hints      = true
+glossary_path           = "config/tech_glossary.toml"
+session_terms_enabled   = true
+pronunciation_hints     = true
 pronunciation_hints_path = "config/pronunciation_hints.toml"
-initial_prompt_template  = "Technical meeting about {topics}. Use simple English."
+initial_prompt_template = "Technical meeting about {topics}. Use simple English."
 
 [resilience]
 enable_degradation           = true
@@ -85,7 +89,7 @@ passthrough_on_total_failure = true
 
 [logging]
 level   = "info"
-file    = "logs/pipeline-windows-preview.log"
+file    = "logs/pipeline-windows-webrtcvad.log"
 console = true
 async   = true
 
@@ -96,4 +100,4 @@ log_per_utterance  = true
 
 [runtime]
 use_simulated_audio  = false
-run_duration_seconds = 20
+run_duration_seconds = 0

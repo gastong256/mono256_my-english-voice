@@ -3,10 +3,10 @@
     "github_actions_runner": "windows-2022",
     "visual_studio": "2022",
     "onnxruntime": {
-      "version": "1.17.3",
-      "archive": "onnxruntime-win-x64-gpu-1.17.3.zip",
-      "root_dir": "onnxruntime-win-x64-gpu-1.17.3",
-      "uri": "https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-win-x64-gpu-1.17.3.zip"
+      "version": "1.22.0",
+      "archive": "onnxruntime-win-x64-gpu-1.22.0.zip",
+      "root_dir": "onnxruntime-win-x64-gpu-1.22.0",
+      "uri": "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-gpu-1.22.0.zip"
     }
   },
   "vcpkg_packages": [
@@ -31,9 +31,19 @@
       "uri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
     },
     {
+      "name": "whisper-small-q5_1",
+      "out_file": "ggml-small-q5_1.bin",
+      "uri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin"
+    },
+    {
       "name": "whisper-tiny",
       "out_file": "ggml-tiny.bin",
       "uri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+    },
+    {
+      "name": "whisper-tiny-q5_1",
+      "out_file": "ggml-tiny-q5_1.bin",
+      "uri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin"
     },
     {
       "name": "piper-lessac-onnx",

@@ -622,8 +622,12 @@ int main(int argc, char** argv) {
   }
 
   // Run until duration expires or signal received.
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::seconds(config.runtime.run_duration_seconds);
+  // run_duration_seconds == 0 means run indefinitely until SIGINT/SIGTERM.
+  const bool run_forever = (config.runtime.run_duration_seconds == 0);
+  const auto deadline = run_forever
+      ? std::chrono::steady_clock::time_point::max()
+      : std::chrono::steady_clock::now() +
+            std::chrono::seconds(config.runtime.run_duration_seconds);
   while (!g_shutdown_requested.load(std::memory_order_relaxed) &&
          std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
