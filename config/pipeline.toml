@@ -72,7 +72,8 @@ tts_cpu_fallback_on_contention = true
 glossary_path           = "config/tech_glossary.toml"
 session_terms_enabled   = true
 pronunciation_hints     = true
-initial_prompt_template = "Technical discussion about {topics}"
+pronunciation_hints_path = "config/pronunciation_hints.toml"
+initial_prompt_template = "Technical meeting about {topics}. Use simple English."
 
 [resilience]
 enable_degradation          = true

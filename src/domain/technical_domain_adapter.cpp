@@ -32,6 +32,27 @@ void replace_all_ci(std::string& target, const std::string& from, const std::str
     pos += to.size();
   }
 }
+
+std::string squash_spaces(const std::string& input) {
+  std::string out;
+  out.reserve(input.size());
+  bool in_space = true;
+  for (const unsigned char ch : input) {
+    if (std::isspace(ch) != 0) {
+      if (!in_space) {
+        out.push_back(' ');
+        in_space = true;
+      }
+      continue;
+    }
+    out.push_back(static_cast<char>(ch));
+    in_space = false;
+  }
+  if (!out.empty() && out.back() == ' ') {
+    out.pop_back();
+  }
+  return out;
+}
 }  // namespace
 
 TechnicalDomainAdapter::TechnicalDomainAdapter(
@@ -39,10 +60,11 @@ TechnicalDomainAdapter::TechnicalDomainAdapter(
     : context_manager_(std::move(context_manager)) {
   load_default_corrections();
   load_default_pronunciation();
+  load_default_preferred_translations();
 }
 
 bool TechnicalDomainAdapter::initialize(const DomainConfig& config, std::string& /*error*/) {
-  // Try to load corrections and pronunciation from the TOML glossary file.
+  // Try to load corrections, preferred translations, and pronunciation from the glossary file.
   if (!config.glossary_path.empty()) {
     try {
       const auto tbl = toml::parse_file(config.glossary_path);
@@ -56,6 +78,16 @@ bool TechnicalDomainAdapter::initialize(const DomainConfig& config, std::string&
         });
         MEV_LOG_INFO("TechnicalDomainAdapter: loaded ", corrections->size(),
                      " corrections from '", config.glossary_path, "'");
+      }
+
+      if (const auto* preferred = tbl["preferred_translations"].as_table()) {
+        preferred->for_each([&](const toml::key& k, const auto& v) {
+          if (const auto* sv = v.as_string()) {
+            preferred_translations_[std::string(k.str())] = sv->get();
+          }
+        });
+        MEV_LOG_INFO("TechnicalDomainAdapter: loaded ", preferred->size(),
+                     " preferred translations from '", config.glossary_path, "'");
       }
 
       // [pronunciation] — override defaults with file entries.
@@ -78,6 +110,27 @@ bool TechnicalDomainAdapter::initialize(const DomainConfig& config, std::string&
     }
   }
 
+  if (config.pronunciation_hints && !config.pronunciation_hints_path.empty()) {
+    try {
+      const auto tbl = toml::parse_file(config.pronunciation_hints_path);
+      if (const auto* hints = tbl["hints"].as_table()) {
+        hints->for_each([&](const toml::key& k, const auto& v) {
+          if (const auto* sv = v.as_string()) {
+            tts_pronunciation_[std::string(k.str())] = sv->get();
+          }
+        });
+        MEV_LOG_INFO("TechnicalDomainAdapter: loaded ", hints->size(),
+                     " pronunciation hints from '", config.pronunciation_hints_path, "'");
+      }
+    } catch (const toml::parse_error& e) {
+      MEV_LOG_WARN("TechnicalDomainAdapter: failed to parse pronunciation hints '",
+                   config.pronunciation_hints_path, "': ", e.description());
+    } catch (const std::exception& e) {
+      MEV_LOG_WARN("TechnicalDomainAdapter: could not open pronunciation hints '",
+                   config.pronunciation_hints_path, "': ", e.what());
+    }
+  }
+
   MEV_LOG_INFO("TechnicalDomainAdapter initialised");
   return true;
 }
@@ -87,11 +140,15 @@ std::string TechnicalDomainAdapter::generate_asr_prompt() const {
 }
 
 std::string TechnicalDomainAdapter::correct_asr_output(const std::string& raw_text) {
-  auto corrected = raw_text;
+  auto corrected = squash_spaces(raw_text);
   for (const auto& [mis, canonical] : asr_corrections_) {
     replace_all_ci(corrected, mis, canonical);
   }
-  return corrected;
+  corrected = context_manager_->normalize(corrected);
+  for (const auto& [from, to] : preferred_translations_) {
+    replace_all_ci(corrected, from, to);
+  }
+  return squash_spaces(corrected);
 }
 
 std::string TechnicalDomainAdapter::prepare_for_tts(const std::string& text) {
@@ -109,7 +166,8 @@ void TechnicalDomainAdapter::update_session_context(const std::string& recognize
 }
 
 void TechnicalDomainAdapter::reset_session() {
-  MEV_LOG_INFO("TechnicalDomainAdapter::reset_session (no-op in current DomainContextManager)");
+  context_manager_->reset_session();
+  MEV_LOG_INFO("TechnicalDomainAdapter::reset_session");
 }
 
 void TechnicalDomainAdapter::load_default_corrections() {
@@ -128,6 +186,7 @@ void TechnicalDomainAdapter::load_default_corrections() {
       {"fast api", "FastAPI"},
       {"read is", "Redis"},
       {"red is", "Redis"},
+      {"readys", "Redis"},
       {"cube ernet ease", "Kubernetes"},
       {"cube net ease", "Kubernetes"},
       {"kubernetes ease", "Kubernetes"},
@@ -137,6 +196,8 @@ void TechnicalDomainAdapter::load_default_corrections() {
       {"jay son schema", "JSON Schema"},
       {"ci cd", "CI/CD"},
       {"ci slash cd", "CI/CD"},
+      {"dead-letter queue", "dead letter queue"},
+      {"rate-limit", "rate limiting"},
       {"s l o", "SLO"},
       {"s l a", "SLA"},
   };
@@ -160,6 +221,26 @@ void TechnicalDomainAdapter::load_default_pronunciation() {
       {"IaC", "infrastructure as code"},
       {"YAML", "yamel"},
       {"FastAPI", "fast A P I"},
+      {"Redis", "red iss"},
+  };
+}
+
+void TechnicalDomainAdapter::load_default_preferred_translations() {
+  preferred_translations_ = {
+      {"we are going to", "we will"},
+      {"we're going to", "we'll"},
+      {"in order to", "to"},
+      {"let me walk you through", "let me explain"},
+      {"the way I would approach this", "I would do this"},
+      {"from a scalability perspective", "for scalability"},
+      {"in terms of performance", "for performance"},
+      {"the bottleneck here is", "the bottleneck is"},
+      {"the architecture looks like", "the architecture is"},
+      {"we can optimize this by", "we can improve this by"},
+      {"high latency issue", "high latency"},
+      {"message broker", "message queue"},
+      {"dead-letter queue", "dead letter queue"},
+      {"rate-limit", "rate limiting"},
   };
 }
 

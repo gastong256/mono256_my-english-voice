@@ -488,6 +488,14 @@ Self-test diagnostics today:
 - when Piper GPU is requested on Windows, it reports whether `onnxruntime_providers_cuda.dll` is visible
 - ASR and TTS backends report requested vs effective placement (`cuda` or `cpu`)
 
+Domain translation quality tooling today:
+
+- `config/tech_glossary.toml` keeps a compact domain glossary plus preferred short-English rewrites
+- `config/pronunciation_hints.toml` provides explicit TTS speakability overrides
+- `eval/domain_realtime_set.jsonl` contains the Phase 3 constrained-domain ES->EN evaluation set
+- `eval/score_domain_eval.py` scores local predictions and can emit a manual review CSV
+- `eval/baseline_status.md` documents the oracle sanity baseline and the remaining real-model evaluation step
+
 Current supported VAD values:
 
 - `none`: fixed-window chunking path

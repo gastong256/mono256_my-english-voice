@@ -1,0 +1,8 @@
+{
+  "avg_required_term_coverage": 1.0,
+  "avg_token_f1": 1.0,
+  "count": 320,
+  "exact_match_rate": 1.0,
+  "manual_label_counts": {},
+  "missing_predictions": 0
+}

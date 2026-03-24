@@ -40,9 +40,11 @@ class TechnicalDomainAdapter final : public IDomainAdapter {
   // Pronunciation hints for TTS: term → speakable expansion.
   // e.g. "kubectl" → "kube control", "nginx" → "engine X"
   std::unordered_map<std::string, std::string> tts_pronunciation_;
+  std::unordered_map<std::string, std::string> preferred_translations_;
 
   void load_default_corrections();
   void load_default_pronunciation();
+  void load_default_preferred_translations();
 };
 
 }  // namespace mev

@@ -27,3 +27,7 @@
 "Elasticsearch" = "elastic search"
 "NoSQL"         = "no S Q L"
 "MySQL"         = "my S Q L"
+"Redis"         = "red iss"
+"load balancer" = "load balancer"
+"rate limiting" = "rate limiting"
+"dead letter queue" = "dead letter queue"

@@ -208,6 +208,8 @@ bool load_config_from_file(const std::string& path, AppConfig& config, std::stri
                                               config.domain.session_terms_enabled);
     config.domain.pronunciation_hints     = (*dom)["pronunciation_hints"].value_or(
                                               config.domain.pronunciation_hints);
+    config.domain.pronunciation_hints_path =
+        (*dom)["pronunciation_hints_path"].value_or(config.domain.pronunciation_hints_path);
     config.domain.initial_prompt_template = (*dom)["initial_prompt_template"].value_or(
                                               config.domain.initial_prompt_template);
     if (const auto v = (*dom)["session_terms_limit"].value<int64_t>()) {

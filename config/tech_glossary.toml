@@ -61,34 +61,46 @@
 "Elasticsearch" = "elastic search"
 "MySQL"         = "my S Q L"
 "NoSQL"         = "no S Q L"
+"Redis"         = "red iss"
+"load balancer" = "load balancer"
+"rate limiting" = "rate limiting"
+"dead letter queue" = "dead letter queue"
+
+[preferred_translations]
+# Post-ASR normalization towards short, understandable technical English.
+"we are going to" = "we will"
+"we're going to" = "we'll"
+"in order to" = "to"
+"let me walk you through" = "let me explain"
+"the way I would approach this" = "I would do this"
+"from a scalability perspective" = "for scalability"
+"in terms of performance" = "for performance"
+"the bottleneck here is" = "the bottleneck is"
+"the architecture looks like" = "the architecture is"
+"we can optimize this by" = "we can improve this by"
+"high latency issue" = "high latency"
+"message broker" = "message queue"
+"dead-letter queue" = "dead letter queue"
+"rate-limit" = "rate limiting"
 
 [domain_terms]
-# These terms are concatenated into the Whisper initial_prompt string to bias
-# the model towards recognising technical vocabulary.
+# Compact term set for low-latency prompting in technical meetings.
 terms = [
-    "Kubernetes", "PostgreSQL", "Redis", "FastAPI", "Docker",
-    "Terraform", "CI/CD", "observability", "tracing", "rate limiting",
-    "idempotency", "event-driven", "async", "throughput", "latency",
-    "SLO", "SLA", "pipeline", "deployment", "production-ready",
-    "microservices", "gRPC", "OAuth", "DevOps", "infrastructure as code",
-    "kubectl", "nginx", "horizontal scaling", "load balancer",
-    "message queue", "dead letter queue", "circuit breaker",
-    "retry policy", "backpressure", "sharding", "replication",
-    "Kafka", "RabbitMQ", "Elasticsearch", "MySQL", "MongoDB",
-    "YAML", "JSON", "REST", "GraphQL", "WebSocket",
+    "PostgreSQL", "Redis", "Kubernetes", "FastAPI", "Docker",
+    "Terraform", "CI/CD", "latency", "throughput", "SLO",
+    "rate limiting", "load balancer", "message queue",
+    "dead letter queue", "database migration", "deployment", "RabbitMQ",
 ]
 
 [frequent_phrases]
-# Common phrases in technical interviews — reserved for future prompt engineering.
+# Short phrases that are likely to appear in the target meeting domain.
 phrases = [
-    "in my experience",
-    "the trade-off here is",
-    "from a scalability perspective",
-    "in terms of performance",
-    "the way I would approach this",
-    "let me walk you through",
-    "the architecture looks like",
-    "we can optimize this by",
-    "the bottleneck here is",
-    "let's think about the failure modes",
+    "review the architecture",
+    "high latency",
+    "database migration",
+    "deploy to production",
+    "scale the service",
+    "fix the bottleneck",
+    "reduce response time",
+    "keep the system stable",
 ]

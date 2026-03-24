@@ -119,13 +119,13 @@ struct DomainConfig {
   std::string glossary_path{"config/tech_glossary.toml"};
   bool session_terms_enabled{true};
   bool pronunciation_hints{true};
-  std::string initial_prompt_template{"Technical discussion about {topics}"};
+  std::string pronunciation_hints_path{"config/pronunciation_hints.toml"};
+  std::string initial_prompt_template{"Technical meeting about {topics}. Use simple English."};
   std::vector<std::string> technical_glossary{
-      "FastAPI", "PostgreSQL", "Redis", "Kubernetes", "Terraform", "CI/CD", "Docker",
-      "observability", "tracing", "rate limiting", "idempotency", "event-driven", "async",
-      "throughput", "latency", "SLO", "SLA", "pipeline", "deployment", "production-ready"};
-  std::vector<std::string> frequent_phrases{"let's review the architecture", "production incident",
-                                            "database migration", "latency budget"};
+      "PostgreSQL", "Redis", "Kubernetes", "FastAPI", "Docker", "Terraform", "CI/CD",
+      "latency", "throughput", "SLO", "rate limiting", "load balancer", "RabbitMQ"};
+  std::vector<std::string> frequent_phrases{"review the architecture", "high latency",
+                                            "database migration", "deploy to production"};
   std::size_t session_terms_limit{64};
 };
 
