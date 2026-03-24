@@ -232,6 +232,9 @@ static void test_invalid_toml() {
   const std::string tmp = "/tmp/mev_test_invalid.toml";
   {
     // Create a file with invalid TOML syntax.
+#ifdef _MSC_VER
+#pragma warning(suppress : 4996)  // fopen: MSVC prefers fopen_s
+#endif
     FILE* f = std::fopen(tmp.c_str(), "w");
     if (f == nullptr) {
       std::cout << "[SKIP] test_invalid_toml: cannot write to /tmp\n";
