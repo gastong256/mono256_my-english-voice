@@ -95,6 +95,13 @@ When ASR is running, TTS falls back to CPU automatically
 
 C++ standard: **C++20** (requires GCC ≥ 13 or Clang ≥ 16).
 
+Runtime contract today:
+
+- `runtime.use_simulated_audio = true` forces simulated audio I/O and is the safe default for local development.
+- `runtime.use_simulated_audio = false` requires a build with `MEV_ENABLE_PORTAUDIO=ON`.
+- Supported `vad.engine` values are only `none` and `webrtcvad`.
+- `silero` is not exposed as a supported backend until a real implementation exists.
+
 ### Dependency modes
 
 - `MEV_FETCH_DEPS=ON`: allows CMake to download fetchable dependencies (`toml++`, `whisper.cpp`, `libfvad`).
@@ -391,6 +398,11 @@ Press **Ctrl+C** to stop cleanly (SIGINT triggers graceful shutdown).
 ## Configuration
 
 Main config: `config/pipeline.toml` — parsed by toml++ (resolved via package, local source override, or FetchContent depending on `MEV_FETCH_DEPS`).
+
+Current supported VAD values:
+
+- `none`: fixed-window chunking path
+- `webrtcvad`: requires `MEV_ENABLE_WEBRTCVAD=ON`
 
 Domain vocabulary: `config/tech_glossary.toml`
 - `[corrections]` — ASR post-processing (Whisper mis-transcriptions → correct term)

@@ -14,10 +14,10 @@ output_ring_capacity = 2048
 
 [vad]
 # Hybrid VAD + timeout chunking strategy.
-# engine = "silero"   requires MEV_ENABLE_ONNXRUNTIME=ON and Silero ONNX model
+# Supported values in the current build:
 # engine = "webrtcvad" requires MEV_ENABLE_WEBRTCVAD=ON (libfvad)
-# engine = "none"     falls back to fixed-window chunking (legacy behaviour)
-engine               = "none"          # TODO(v2): switch to "silero" once model downloaded
+# engine = "none"      falls back to fixed-window chunking (legacy behaviour)
+engine               = "none"
 threshold            = 0.5
 silence_duration_ms  = 300
 max_chunk_duration_ms = 3000

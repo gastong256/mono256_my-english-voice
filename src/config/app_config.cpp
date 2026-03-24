@@ -292,6 +292,11 @@ bool validate_config(const AppConfig& config, std::string& error) {
     return false;
   }
 
+  if (config.vad.engine != "none" && config.vad.engine != "webrtcvad") {
+    error = "vad.engine must be one of: none, webrtcvad";
+    return false;
+  }
+
   if (config.asr.chunk_ms > 0 && config.asr.hop_ms > 0 &&
       config.asr.hop_ms > config.asr.chunk_ms) {
     error = "asr.hop_ms must be <= asr.chunk_ms";

@@ -7,6 +7,7 @@
 
 int main() {
   auto config = mev::default_config();
+  config.runtime.use_simulated_audio = true;
   config.runtime.run_duration_seconds = 2;
   config.audio.frames_per_buffer = 240;
   config.asr.chunk_ms = 320;

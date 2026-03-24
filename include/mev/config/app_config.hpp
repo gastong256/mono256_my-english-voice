@@ -30,13 +30,13 @@ struct AudioConfig {
 // VadConfig — maps to [vad] in pipeline.toml
 // ---------------------------------------------------------------------------
 struct VadConfig {
-  std::string engine{"silero"};          // "silero", "webrtcvad"
+  std::string engine{"none"};            // "none", "webrtcvad"
   float threshold{0.5F};
   std::uint32_t silence_duration_ms{300};
   std::uint32_t max_chunk_duration_ms{3000};
   std::uint32_t leading_pad_ms{200};
   std::uint32_t trailing_pad_ms{300};
-  // TODO(v2): Silero VAD via ONNX Runtime or libfvad as fallback
+  // TODO(v2): add a real Silero backend before exposing it in public config.
 };
 
 // ---------------------------------------------------------------------------

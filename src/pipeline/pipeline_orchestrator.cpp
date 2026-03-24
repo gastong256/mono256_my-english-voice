@@ -89,6 +89,56 @@ inline int16_t float_to_int16(float v) {
   return static_cast<int16_t>(v * 32767.0F);
 }
 
+bool initialize_audio_backends(const AppConfig& config,
+                               std::unique_ptr<IAudioInput>& audio_input,
+                               std::unique_ptr<IAudioOutput>& audio_output) {
+  if (config.runtime.use_simulated_audio) {
+    audio_input  = std::make_unique<SimulatedAudioInput>(
+        config.audio.sample_rate_hz, config.audio.input_channels,
+        config.audio.frames_per_buffer);
+    audio_output = std::make_unique<SimulatedAudioOutput>(
+        config.audio.sample_rate_hz, config.audio.output_channels,
+        config.audio.frames_per_buffer);
+    return true;
+  }
+
+#if defined(MEV_ENABLE_PORTAUDIO)
+  audio_input  = std::make_unique<PortAudioInput>(
+      config.audio.sample_rate_hz, config.audio.input_channels,
+      config.audio.frames_per_buffer, config.audio.input_device);
+  audio_output = std::make_unique<PortAudioOutput>(
+      config.audio.sample_rate_hz, config.audio.output_channels,
+      config.audio.frames_per_buffer, config.audio.output_device);
+  return true;
+#else
+  MEV_LOG_ERROR("runtime.use_simulated_audio=false requires a build with "
+                "MEV_ENABLE_PORTAUDIO=ON");
+  return false;
+#endif
+}
+
+bool initialize_vad_engine(const AppConfig& config, std::unique_ptr<IVadEngine>& vad_engine) {
+  if (config.vad.engine == "none") {
+    vad_engine = std::make_unique<NullVadEngine>();
+    return vad_engine->initialize(config.vad);
+  }
+
+  if (config.vad.engine == "webrtcvad") {
+#if defined(MEV_ENABLE_WEBRTCVAD)
+    vad_engine = std::make_unique<WebRtcVadEngine>();
+    return vad_engine->initialize(config.vad);
+#else
+    MEV_LOG_ERROR("vad.engine=webrtcvad requires a build with "
+                  "MEV_ENABLE_WEBRTCVAD=ON");
+    return false;
+#endif
+  }
+
+  MEV_LOG_ERROR("unsupported vad.engine='", config.vad.engine,
+                "' (supported: none, webrtcvad)");
+  return false;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -184,20 +234,9 @@ bool PipelineOrchestrator::initialize_components() {
   text_to_tts_   = std::make_unique<SpscRingBuffer<std::unique_ptr<Utterance>>>(config_.pipeline.max_queue_depth + 2U);
   tts_to_output_ = std::make_unique<SpscRingBuffer<OutputAudioBlock>>(config_.audio.output_ring_capacity);
 
-  // Audio I/O — PortAudio when compiled in, simulated otherwise.
-#if defined(MEV_ENABLE_PORTAUDIO)
-  audio_input_  = std::make_unique<PortAudioInput>(
-      config_.audio.sample_rate_hz, config_.audio.input_channels,
-      config_.audio.frames_per_buffer, config_.audio.input_device);
-  audio_output_ = std::make_unique<PortAudioOutput>(
-      config_.audio.sample_rate_hz, config_.audio.output_channels,
-      config_.audio.frames_per_buffer, config_.audio.output_device);
-#else
-  audio_input_  = std::make_unique<SimulatedAudioInput>(
-      config_.audio.sample_rate_hz, config_.audio.input_channels, config_.audio.frames_per_buffer);
-  audio_output_ = std::make_unique<SimulatedAudioOutput>(
-      config_.audio.sample_rate_hz, config_.audio.output_channels, config_.audio.frames_per_buffer);
-#endif
+  if (!initialize_audio_backends(config_, audio_input_, audio_output_)) {
+    return false;
+  }
 
   // ASR — whisper.cpp when compiled in, stub otherwise.
 #if defined(MEV_ENABLE_WHISPER_CPP)
@@ -244,13 +283,11 @@ bool PipelineOrchestrator::initialize_components() {
       .drop_policy         = config_.pipeline.drop_policy,
   });
 
-  // VAD engine.
-#if defined(MEV_ENABLE_WEBRTCVAD)
-  vad_engine_ = std::make_unique<WebRtcVadEngine>();
-#else
-  vad_engine_ = std::make_unique<NullVadEngine>();
-#endif
-  vad_engine_->initialize(config_.vad);
+  if (!initialize_vad_engine(config_, vad_engine_)) {
+    MEV_LOG_ERROR("failed to initialize VAD backend for vad.engine='",
+                  config_.vad.engine, "'");
+    return false;
+  }
 
   // Resamplers.
 #if defined(MEV_ENABLE_LIBSAMPLERATE)

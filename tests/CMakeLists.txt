@@ -18,6 +18,7 @@ add_mev_test(test_tts_scheduler_policy test_tts_scheduler_policy.cpp)
 add_mev_test(test_domain_corrections   test_domain_corrections.cpp)
 add_mev_test(test_gpu_scheduler        test_gpu_scheduler.cpp)
 add_mev_test(test_pipeline_shutdown    test_pipeline_shutdown.cpp)
+add_mev_test(test_runtime_backend_selection test_runtime_backend_selection.cpp)
 
 # Phase 2 integration tests
 # Always compiled: TOML config parser test
