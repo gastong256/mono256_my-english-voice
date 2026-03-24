@@ -1,0 +1,22 @@
+{
+  "acceptance_max": {
+    "interactive_preview": {
+      "ttfa_audio_p50_ms": 450.0
+    },
+    "interactive_balanced": {
+      "ttfa_audio_p50_ms": 650.0
+    },
+    "interactive_balanced_cuda": {
+      "ttfa_audio_p50_ms": 650.0
+    }
+  },
+  "relative_regression_fraction_max": {
+    "ttfa_audio_p50_ms": 0.15,
+    "ttfa_audio_p95_ms": 0.15
+  },
+  "non_increasing_metrics": [
+    "queue_drops",
+    "output_underruns",
+    "stale_cancelled"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "toolchain": {
+    "github_actions_runner": "windows-2022",
+    "visual_studio": "2022",
+    "onnxruntime": {
+      "version": "1.17.3",
+      "archive": "onnxruntime-win-x64-gpu-1.17.3.zip",
+      "root_dir": "onnxruntime-win-x64-gpu-1.17.3",
+      "uri": "https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-win-x64-gpu-1.17.3.zip"
+    }
+  },
+  "vcpkg_packages": [
+    "portaudio:x64-windows",
+    "espeak-ng:x64-windows",
+    "libsamplerate:x64-windows"
+  ],
+  "models": [
+    {
+      "name": "whisper-small",
+      "out_file": "ggml-small.bin",
+      "uri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+    },
+    {
+      "name": "whisper-tiny",
+      "out_file": "ggml-tiny.bin",
+      "uri": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+    },
+    {
+      "name": "piper-lessac-onnx",
+      "out_file": "en_US-lessac-medium.onnx",
+      "uri": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
+    },
+    {
+      "name": "piper-lessac-config",
+      "out_file": "en_US-lessac-medium.onnx.json",
+      "uri": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
+    }
+  ]
+}

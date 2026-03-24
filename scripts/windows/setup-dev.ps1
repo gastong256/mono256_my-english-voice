@@ -16,6 +16,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Get-MevRepoRoot -RepoRoot $RepoRoot
 Assert-MevWindowsCheckout -RepoRoot $repoRoot
+$depsLock = Get-MevDepsLockData -RepoRoot $repoRoot
 
 Assert-MevCommand -Name "git"
 Assert-MevCommand -Name "cmake"
@@ -31,28 +32,17 @@ $vcpkgRoot = $envData.VcpkgRoot
 $onnxRuntimeRoot = $envData.OnnxRuntimeRoot
 
 $downloadsDir = Join-Path $repoRoot ".local\downloads"
-$onnxZip = Join-Path $downloadsDir "onnxruntime-win-x64-gpu-1.17.3.zip"
-$onnxUri = "https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-win-x64-gpu-1.17.3.zip"
+$onnxZip = Join-Path $downloadsDir $depsLock.toolchain.onnxruntime.archive
+$onnxUri = $depsLock.toolchain.onnxruntime.uri
 
 $modelsDir = Join-Path $repoRoot "models"
-$modelDownloads = @(
-  @{
-    Uri = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
-    OutFile = (Join-Path $modelsDir "ggml-small.bin")
-  },
-  @{
-    Uri = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
-    OutFile = (Join-Path $modelsDir "ggml-tiny.bin")
-  },
-  @{
-    Uri = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
-    OutFile = (Join-Path $modelsDir "en_US-lessac-medium.onnx")
-  },
-  @{
-    Uri = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
-    OutFile = (Join-Path $modelsDir "en_US-lessac-medium.onnx.json")
+$modelDownloads = @()
+foreach ($model in $depsLock.models) {
+  $modelDownloads += @{
+    Uri = $model.uri
+    OutFile = (Join-Path $modelsDir $model.out_file)
   }
-)
+}
 
 if (-not $SkipVcpkgInstall) {
   if (-not (Test-Path -Path (Join-Path $vcpkgRoot ".git"))) {
@@ -77,12 +67,7 @@ if (-not $SkipPackageInstall) {
     throw "vcpkg.exe not found at $vcpkgExe. Run setup without -SkipVcpkgInstall first."
   }
 
-  Invoke-MevStep -Description "Installing native packages via vcpkg" -Command $vcpkgExe -Arguments @(
-    "install",
-    "portaudio:x64-windows",
-    "espeak-ng:x64-windows",
-    "libsamplerate:x64-windows"
-  )
+  Invoke-MevStep -Description "Installing native packages via vcpkg" -Command $vcpkgExe -Arguments (@("install") + @($depsLock.vcpkg_packages))
 }
 
 if (-not $SkipOnnxDownload) {
@@ -132,6 +117,9 @@ Write-Host "Windows development environment is ready."
 Write-Host "RepoRoot:         $repoRoot"
 Write-Host "VCPKG_ROOT:       $vcpkgRoot"
 Write-Host "ONNXRUNTIME_ROOT: $onnxRuntimeRoot"
+Write-Host "Pinned runner:    $($depsLock.toolchain.github_actions_runner)"
+Write-Host "Pinned VS:        $($depsLock.toolchain.visual_studio)"
+Write-Host "Pinned ORT:       $($depsLock.toolchain.onnxruntime.version)"
 Write-Host "Env helper:       $envFile"
 Write-Host ""
 Write-Host "Next steps:"

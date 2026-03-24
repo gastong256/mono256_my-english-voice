@@ -1,0 +1,11 @@
+{
+  "minimum_rates": {
+    "manual_b1_or_better_rate": 0.85,
+    "manual_b2_or_better_rate": 0.6
+  },
+  "relative_drop_fraction_max": {
+    "manual_ab_rate": 0.1,
+    "manual_b1_or_better_rate": 0.1,
+    "manual_b2_or_better_rate": 0.1
+  }
+}

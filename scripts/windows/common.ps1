@@ -16,6 +16,20 @@ function Get-MevRepoRoot {
   return (Resolve-Path -Path (Join-Path $PSScriptRoot "..\..")).Path
 }
 
+function Get-MevDepsLockData {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot
+  )
+
+  $lockPath = Join-Path $RepoRoot "scripts\windows\deps.lock.json"
+  if (-not (Test-Path -Path $lockPath)) {
+    throw "Dependency lock file not found: $lockPath"
+  }
+
+  return (Get-Content -Path $lockPath -Raw | ConvertFrom-Json)
+}
+
 function Assert-MevCommand {
   param(
     [Parameter(Mandatory = $true)]
@@ -53,7 +67,8 @@ function Get-MevDefaultOnnxRuntimeRoot {
     [string]$RepoRoot
   )
 
-  return (Join-Path $RepoRoot ".local\onnxruntime\onnxruntime-win-x64-gpu-1.17.3")
+  $depsLock = Get-MevDepsLockData -RepoRoot $RepoRoot
+  return (Join-Path $RepoRoot (Join-Path ".local\onnxruntime" $depsLock.toolchain.onnxruntime.root_dir))
 }
 
 function Get-MevLocalEnvFile {

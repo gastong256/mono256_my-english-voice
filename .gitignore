@@ -54,6 +54,8 @@ models/
 # Runtime logs
 logs/
 artifacts/benchmarks/
+__pycache__/
+*.pyc
 
 # Editor / IDE
 .vscode/

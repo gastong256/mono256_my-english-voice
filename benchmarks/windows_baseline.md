@@ -6,6 +6,9 @@ Date: 2026-03-24
 
 The benchmark workflow for Windows is implemented, but this repository does not check in machine-specific latency numbers.
 
+Machine-specific benchmark numbers should stay local or be attached as workflow artifacts.
+The checked-in contract is stored in `benchmarks/regression_thresholds.json`.
+
 Generate a local baseline with:
 
 ```powershell
@@ -32,3 +35,4 @@ or from WSL2:
 
 - `gpu_busy_time_ms` is still reported as `null` until a dedicated GPU occupancy probe is added.
 - The benchmark script writes local artifacts under `artifacts/benchmarks/`.
+- Compare a measured run with `python3 scripts/check_realtime_regressions.py --latency-summary ... --latency-thresholds benchmarks/regression_thresholds.json`.

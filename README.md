@@ -7,6 +7,27 @@ it to a virtual microphone device for use in video calls.
 **Target OS:** Linux (PipeWire / ALSA loopback) and Windows 11 (VB-Cable / WASAPI).
 macOS (BlackHole) is planned.
 
+## Current Status
+
+The repository now contains the full implementation track for the
+`realtime-perceived-windows-cuda` plan:
+
+- explicit runtime modes for `interactive_preview` and `interactive_balanced`
+- Windows bootstrap, WSL2 wrappers, self-test, smoke, and benchmark scripts
+- incremental ASR partials and chunked low-latency TTS emission
+- Piper primary path with eSpeak fallback
+- checked-in latency and conversational quality guardrails
+- Windows CPU CI plus a nightly/manual Windows latency benchmark workflow
+
+What is still **not** claimed by this README:
+
+- a checked-in real Windows 11 benchmark proving `TTFA_audio_p50 <= 450 ms`
+- a checked-in reviewed conversational baseline proving the `B1/B2` target on real runs
+- a completed positive validation on real Windows hardware with mic + VB-Cable + CUDA
+
+Treat the implementation as feature-complete at the repo level, but still pending final
+hardware-backed validation before calling the experiment "real-time ready".
+
 ---
 
 ## Architecture
@@ -218,6 +239,9 @@ Open PowerShell in the repo root and run:
 .\scripts\windows\self-test.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.toml
 .\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.toml
 ```
+
+Detailed Windows 11 setup, validation, benchmarking, and VB-Cable instructions live in
+[`docs/windows-11-runbook.md`](/home/gastong256/projects/mono256_my-english-voice/docs/windows-11-runbook.md).
 
 The setup script:
 
@@ -500,14 +524,25 @@ Domain translation quality tooling today:
 - `config/pronunciation_hints.toml` provides explicit TTS speakability overrides
 - `eval/domain_realtime_set.jsonl` contains the Phase 3 constrained-domain ES->EN evaluation set
 - `eval/score_domain_eval.py` scores local predictions and can emit a manual review CSV
+- `eval/conversational_thresholds.json` defines the checked-in B1/B2 quality guardrails
 - `eval/baseline_status.md` documents the oracle sanity baseline and the remaining real-model evaluation step
 
 Windows latency benchmarking today:
 
 - `scripts/windows/benchmark-latency.ps1` is the official Windows benchmark entrypoint
 - `scripts/wsl/windows-benchmark.sh` is the WSL2 wrapper for that workflow
+- `benchmarks/regression_thresholds.json` defines the checked-in TTFA guardrails
+- `scripts/check_realtime_regressions.py` compares benchmark or review summaries against those guardrails
 - benchmark artifacts are written under `artifacts/benchmarks/<timestamp>/`
 - the workflow runs a synthetic scheduler benchmark plus short real-app sessions for `interactive_preview` and `interactive_balanced`
+
+Serious remaining TODOs:
+
+- run the full Windows 11 validation path on real hardware and save the first accepted latency summary
+- generate a real reviewed conversational summary from Windows runs and compare it against `eval/conversational_thresholds.json`
+- validate the positive CUDA path for Whisper and Piper on Windows, not just fallback diagnostics
+- confirm the real virtual microphone path end-to-end in Meet / Zoom / Teams using VB-Cable
+- add a dedicated GPU occupancy probe if `gpu_busy_time_ms` is required for future tuning
 
 Current supported VAD values:
 
@@ -547,5 +582,6 @@ Any config field can be overridden after TOML load with `--<section>.<key> <valu
 |------|-------|
 | XTTSv2 | When stable ONNX export is available (`ITTSEngine` interface ready) |
 | macOS support | BlackHole virtual mic + CoreAudio backend |
-| Partial hypotheses | Streaming text output from Whisper for lower perceived latency |
+| Real Windows validation dataset | First checked-in accepted benchmark and reviewed conversational baseline |
+| GPU occupancy probe | Replace `gpu_busy_time_ms = null` with measured GPU load/occupancy |
 | piper-phonemize parity | Optional future upgrade for broader Piper voice compatibility beyond the current eSpeak/text phonemization path |

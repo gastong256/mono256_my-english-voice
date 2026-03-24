@@ -9,6 +9,20 @@ import json
 from collections import Counter
 from pathlib import Path
 
+PROFILE_BY_LABEL = {
+    "A": "C1",
+    "B": "B2",
+    "C": "B1",
+    "D": "below_b1",
+}
+
+FIX_BUCKET_BY_ERROR = {
+    "term_drift": "domain_glossary_or_prompt",
+    "truncation": "asr_tts_budget_or_scheduler",
+    "over_literal_phrasing": "translation_preferences_or_domain_adapter",
+    "clause_split_bad_timing": "speech_chunker_or_scheduler_tuning",
+}
+
 
 def load_jsonl(path: Path) -> list[dict]:
     rows: list[dict] = []
@@ -45,17 +59,44 @@ def term_coverage(prediction: str, required_terms: list[str]) -> float:
     return covered / len(required_terms)
 
 
-def load_labels(path: Path | None) -> dict[str, str]:
+def normalize_manual_field(value: str) -> str:
+    return value.strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def infer_profile(label: str, profile: str) -> str:
+    if profile:
+        normalized = normalize_manual_field(profile)
+        if normalized in {"b1", "b2", "c1", "below_b1"}:
+            return normalized
+    return PROFILE_BY_LABEL.get(label, "")
+
+
+def infer_fix_bucket(error_category: str, fix_bucket: str) -> str:
+    if fix_bucket:
+        return normalize_manual_field(fix_bucket)
+    return FIX_BUCKET_BY_ERROR.get(normalize_manual_field(error_category), "")
+
+
+def load_labels(path: Path | None) -> dict[str, dict[str, str]]:
     if path is None:
         return {}
-    labels: dict[str, str] = {}
+    labels: dict[str, dict[str, str]] = {}
     with path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
             sample_id = row.get("id", "").strip()
             label = row.get("label", "").strip().upper()
             if sample_id and label:
-                labels[sample_id] = label
+                error_category = normalize_manual_field(row.get("primary_error", ""))
+                profile = infer_profile(label, row.get("conversational_profile", ""))
+                fix_bucket = infer_fix_bucket(error_category, row.get("fix_bucket", ""))
+                labels[sample_id] = {
+                    "label": label,
+                    "primary_error": error_category,
+                    "conversational_profile": profile,
+                    "fix_bucket": fix_bucket,
+                    "notes": row.get("notes", "").strip(),
+                }
     return labels
 
 
@@ -88,13 +129,27 @@ def main() -> None:
     coverage_sum = 0.0
     missing_predictions = 0
     label_counts = Counter()
+    profile_counts = Counter()
+    error_counts = Counter()
+    fix_bucket_counts = Counter()
 
     if args.emit_review_csv is not None:
         args.emit_review_csv.parent.mkdir(parents=True, exist_ok=True)
         review_handle = args.emit_review_csv.open("w", encoding="utf-8", newline="")
         writer = csv.DictWriter(
             review_handle,
-            fieldnames=["id", "category", "source_es", "reference_en", "prediction_en", "label", "notes"],
+            fieldnames=[
+                "id",
+                "category",
+                "source_es",
+                "reference_en",
+                "prediction_en",
+                "label",
+                "conversational_profile",
+                "primary_error",
+                "fix_bucket",
+                "notes",
+            ],
         )
         writer.writeheader()
     else:
@@ -112,9 +167,17 @@ def main() -> None:
         coverage_sum += term_coverage(prediction, row.get("required_terms", []))
 
         if row["id"] in labels:
-            label_counts[labels[row["id"]]] += 1
+            manual = labels[row["id"]]
+            label_counts[manual["label"]] += 1
+            if manual["conversational_profile"]:
+                profile_counts[manual["conversational_profile"]] += 1
+            if manual["primary_error"]:
+                error_counts[manual["primary_error"]] += 1
+            if manual["fix_bucket"]:
+                fix_bucket_counts[manual["fix_bucket"]] += 1
 
         if writer is not None:
+            manual = labels.get(row["id"], {})
             writer.writerow(
                 {
                     "id": row["id"],
@@ -122,8 +185,11 @@ def main() -> None:
                     "source_es": row["source_es"],
                     "reference_en": row["reference_en"],
                     "prediction_en": prediction,
-                    "label": labels.get(row["id"], ""),
-                    "notes": "",
+                    "label": manual.get("label", ""),
+                    "conversational_profile": manual.get("conversational_profile", ""),
+                    "primary_error": manual.get("primary_error", ""),
+                    "fix_bucket": manual.get("fix_bucket", ""),
+                    "notes": manual.get("notes", ""),
                 }
             )
 
@@ -137,12 +203,24 @@ def main() -> None:
         "avg_token_f1": round(f1_sum / total, 4),
         "avg_required_term_coverage": round(coverage_sum / total, 4),
         "manual_label_counts": dict(label_counts),
+        "manual_profile_counts": dict(profile_counts),
+        "manual_error_counts": dict(error_counts),
+        "manual_fix_bucket_counts": dict(fix_bucket_counts),
     }
 
     if label_counts:
         ab_count = label_counts.get("A", 0) + label_counts.get("B", 0)
         summary["manual_ab_rate"] = round(ab_count / total, 4)
         summary["manual_a_rate"] = round(label_counts.get("A", 0) / total, 4)
+        summary["manual_b1_or_better_rate"] = round(
+            (profile_counts.get("b1", 0) + profile_counts.get("b2", 0) + profile_counts.get("c1", 0)) / total,
+            4,
+        )
+        summary["manual_b2_or_better_rate"] = round(
+            (profile_counts.get("b2", 0) + profile_counts.get("c1", 0)) / total,
+            4,
+        )
+        summary["manual_c1_rate"] = round(profile_counts.get("c1", 0) / total, 4)
 
     rendered = json.dumps(summary, indent=2, sort_keys=True)
     print(rendered)

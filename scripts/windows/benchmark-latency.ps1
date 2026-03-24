@@ -5,6 +5,8 @@ param(
   [string[]]$ConfigPaths = @("config/pipeline.windows.preview.toml", "config/pipeline.windows.toml"),
   [string]$VcpkgRoot,
   [string]$OnnxRuntimeRoot,
+  [string]$ArtifactRoot,
+  [string[]]$AppArgs = @(),
   [int]$RunDurationSeconds = 12,
   [switch]$BuildFirst,
   [switch]$SkipSynthetic,
@@ -122,7 +124,11 @@ if (-not (Test-Path -Path $benchmarkExe)) {
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$artifactRoot = Join-Path $repoRoot "artifacts\benchmarks\$timestamp"
+if ($ArtifactRoot) {
+  $artifactRoot = $ArtifactRoot
+} else {
+  $artifactRoot = Join-Path $repoRoot "artifacts\benchmarks\$timestamp"
+}
 New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
 
 $summary = [ordered]@{
@@ -130,6 +136,7 @@ $summary = [ordered]@{
   preset = $Preset
   repo_root = $repoRoot
   run_duration_seconds = $RunDurationSeconds
+  app_args = @($AppArgs)
   synthetic = @{}
   sessions = @()
 }
@@ -158,7 +165,7 @@ foreach ($configPath in $ConfigPaths) {
   if (-not $SkipSelfTest) {
     $selfTestLog = Join-Path $sessionDir "self-test.log"
     Write-Host "==> Running self-test ($label)"
-    & $exePath @("--self-test", "--config", $resolvedConfigPath) *>&1 | Tee-Object -FilePath $selfTestLog
+    & $exePath @("--self-test", "--config", $resolvedConfigPath) @AppArgs *>&1 | Tee-Object -FilePath $selfTestLog
     if ($LASTEXITCODE -ne 0) {
       throw "Self-test failed for $label. See $selfTestLog"
     }
@@ -166,7 +173,7 @@ foreach ($configPath in $ConfigPaths) {
 
   $runLog = Join-Path $sessionDir "run.log"
   Write-Host "==> Running latency session ($label)"
-  & $exePath @("--config", $resolvedConfigPath, "--runtime.run_duration_seconds", "$RunDurationSeconds") *>&1 | Tee-Object -FilePath $runLog
+  & $exePath @("--config", $resolvedConfigPath, "--runtime.run_duration_seconds", "$RunDurationSeconds") @AppArgs *>&1 | Tee-Object -FilePath $runLog
   if ($LASTEXITCODE -ne 0) {
     throw "Run failed for $label. See $runLog"
   }

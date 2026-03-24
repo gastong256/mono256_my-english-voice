@@ -1,0 +1,57 @@
+name: windows-latency-benchmark
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  benchmark:
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          python --version
+
+      - name: Bootstrap Windows dependencies
+        shell: pwsh
+        run: |
+          ./scripts/windows/setup-dev.ps1 -RepoRoot $PWD.Path
+
+      - name: Build Windows full preset
+        shell: pwsh
+        run: |
+          ./scripts/windows/build.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-full
+
+      - name: Run Windows latency benchmark with simulated audio
+        shell: pwsh
+        run: |
+          ./scripts/windows/benchmark-latency.ps1 `
+            -RepoRoot $PWD.Path `
+            -Preset windows-msvc-full `
+            -ArtifactRoot (Join-Path $PWD.Path 'artifacts\benchmarks\github-actions') `
+            -ConfigPaths @('config/pipeline.windows.preview.toml', 'config/pipeline.windows.toml') `
+            -AppArgs @('--runtime.use_simulated_audio', 'true')
+
+      - name: Check latency guardrails
+        shell: pwsh
+        run: |
+          python ./scripts/check_realtime_regressions.py `
+            --latency-summary artifacts/benchmarks/github-actions/summary.json `
+            --latency-thresholds benchmarks/regression_thresholds.json
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-latency-benchmark
+          path: artifacts/benchmarks/github-actions
