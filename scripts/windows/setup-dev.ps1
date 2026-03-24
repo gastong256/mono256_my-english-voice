@@ -44,24 +44,43 @@ foreach ($model in $depsLock.models) {
   }
 }
 
+$bootstrap = Join-Path $vcpkgRoot "bootstrap-vcpkg.bat"
+$vcpkgExe = Join-Path $vcpkgRoot "vcpkg.exe"
+$vcpkgToolchain = Join-Path $vcpkgRoot "scripts\buildsystems\vcpkg.cmake"
+$hasClonedVcpkg = Test-Path -Path (Join-Path $vcpkgRoot ".git")
+$hasUsableVcpkg = (Test-Path -Path $vcpkgExe) -or (Test-Path -Path $bootstrap) -or (Test-Path -Path $vcpkgToolchain)
+$vcpkgRootExists = Test-Path -Path $vcpkgRoot
+$vcpkgRootIsEmpty = $false
+if ($vcpkgRootExists) {
+  $vcpkgRootIsEmpty = @(Get-ChildItem -Force -Path $vcpkgRoot | Select-Object -First 1).Count -eq 0
+}
+
 if (-not $SkipVcpkgInstall) {
-  if (-not (Test-Path -Path (Join-Path $vcpkgRoot ".git"))) {
+  if (-not $vcpkgRootExists -or $vcpkgRootIsEmpty) {
     Invoke-MevStep -Description "Cloning vcpkg" -Command "git" -Arguments @(
       "clone",
       "https://github.com/microsoft/vcpkg.git",
       $vcpkgRoot
     )
+    $hasClonedVcpkg = $true
+    $hasUsableVcpkg = $true
+  } elseif ($hasClonedVcpkg) {
+    Write-Host "==> Reusing cloned vcpkg checkout: $vcpkgRoot"
+  } elseif ($hasUsableVcpkg) {
+    Write-Host "==> Reusing existing vcpkg installation: $vcpkgRoot"
+  } else {
+    throw "VCPKG_ROOT points to a non-empty path that is not a usable vcpkg install: $vcpkgRoot"
   }
 
-  $bootstrap = Join-Path $vcpkgRoot "bootstrap-vcpkg.bat"
   if (-not (Test-Path -Path $bootstrap)) {
-    throw "vcpkg bootstrap script not found at $bootstrap"
+    if (-not (Test-Path -Path $vcpkgExe)) {
+      throw "vcpkg bootstrap script not found at $bootstrap and vcpkg.exe is also missing under $vcpkgRoot"
+    }
+  } elseif (-not (Test-Path -Path $vcpkgExe)) {
+    Invoke-MevStep -Description "Bootstrapping vcpkg" -Command $bootstrap
   }
-
-  Invoke-MevStep -Description "Bootstrapping vcpkg" -Command $bootstrap
 }
 
-$vcpkgExe = Join-Path $vcpkgRoot "vcpkg.exe"
 if (-not $SkipPackageInstall) {
   if (-not (Test-Path -Path $vcpkgExe)) {
     throw "vcpkg.exe not found at $vcpkgExe. Run setup without -SkipVcpkgInstall first."
