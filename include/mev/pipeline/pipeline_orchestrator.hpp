@@ -84,6 +84,8 @@ class PipelineOrchestrator final : public IPipelineOrchestrator {
   // ---- Startup helpers --------------------------------------------------
   bool initialize_components();
   bool warmup_models();
+  bool configure_tts_resampler_for_active_engine();
+  bool activate_tts_fallback(const char* reason);
 
   // ---- RT audio callbacks (Thread 0 / Thread 1) -------------------------
   void on_audio_input_callback(const float* input, std::size_t frames, std::uint16_t channels,

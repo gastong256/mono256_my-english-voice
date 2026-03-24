@@ -1,7 +1,14 @@
 #pragma once
 
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#if defined(MEV_ENABLE_ONNXRUNTIME)
+#include <onnxruntime_cxx_api.h>
+#endif
 
 #include "mev/tts/i_tts_engine.hpp"
 
@@ -20,6 +27,9 @@ namespace mev {
 // ---------------------------------------------------------------------------
 class PiperTTSEngine final : public ITTSEngine {
  public:
+  using PhonemeIdMap = std::unordered_map<char32_t, std::vector<std::int64_t>>;
+  using PhonemeMap = std::unordered_map<char32_t, std::vector<char32_t>>;
+
   PiperTTSEngine() = default;
   ~PiperTTSEngine() override { shutdown(); }
 
@@ -31,12 +41,32 @@ class PiperTTSEngine final : public ITTSEngine {
   void shutdown() override;
 
  private:
+  [[nodiscard]] bool assets_exist(std::string& error) const;
+  [[nodiscard]] bool load_voice_config(std::string& error);
+  [[nodiscard]] bool load_onnx_session(std::string& error);
+  [[nodiscard]] bool text_to_phoneme_ids(const std::string& text,
+                                         std::vector<std::int64_t>& phoneme_ids,
+                                         std::string& error) const;
+  [[nodiscard]] bool synthesize_ids(const std::vector<std::int64_t>& phoneme_ids,
+                                    std::vector<float>& pcm_out,
+                                    std::string& error);
+
   TTSConfig config_{};
   int output_sample_rate_{22050};
   bool initialized_{false};
+  std::string phoneme_type_{"text"};
+  std::string espeak_voice_{"en"};
+  std::uint32_t num_speakers_{1};
+  float noise_scale_{0.667F};
+  float length_scale_{1.0F};
+  float noise_w_{0.8F};
+  PhonemeIdMap phoneme_id_map_;
+  PhonemeMap phoneme_map_;
 
-  // TODO(MEV_ENABLE_ONNXRUNTIME): Ort::Env ort_env_;
-  // TODO(MEV_ENABLE_ONNXRUNTIME): Ort::Session session_{nullptr};
+#if defined(MEV_ENABLE_ONNXRUNTIME)
+  std::unique_ptr<Ort::Env> ort_env_;
+  std::unique_ptr<Ort::Session> session_;
+#endif
 };
 
 }  // namespace mev

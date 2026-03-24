@@ -63,7 +63,7 @@ if(MEV_ENABLE_ONNXRUNTIME)
     message(FATAL_ERROR "ONNXRUNTIME_ROOT must be set when MEV_ENABLE_ONNXRUNTIME=ON")
   endif()
   target_compile_definitions(mev PUBLIC MEV_ENABLE_ONNXRUNTIME=1)
-  target_include_directories(mev PRIVATE "${ONNXRUNTIME_ROOT}/include")
+  target_include_directories(mev PUBLIC "${ONNXRUNTIME_ROOT}/include")
   if(WIN32)
     target_link_libraries(mev PUBLIC "${ONNXRUNTIME_ROOT}/lib/onnxruntime.lib")
     # Copy the DLL next to the executable at build time.

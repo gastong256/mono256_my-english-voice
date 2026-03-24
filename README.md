@@ -87,7 +87,7 @@ When ASR is running, TTS falls back to CPU automatically
 | [toml++](https://github.com/marzer/tomlplusplus) | Config parser | always on | `find_package`, local source override, or FetchContent |
 | [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | ASR inference | `MEV_ENABLE_WHISPER_CPP` | Local source override or FetchContent v1.7.4 |
 | [ONNX Runtime](https://github.com/microsoft/onnxruntime) | Piper TTS | `MEV_ENABLE_ONNXRUNTIME` | Pre-built binary |
-| [Piper TTS](https://github.com/rhasspy/piper) | Primary TTS backend | `MEV_ENABLE_ONNXRUNTIME` | Stub until ONNX linked |
+| [Piper TTS](https://github.com/rhasspy/piper) | Primary TTS backend | `MEV_ENABLE_ONNXRUNTIME` | ONNX session-backed synthesis with eSpeak fallback |
 | [eSpeak-ng](https://github.com/espeak-ng/espeak-ng) | TTS fallback | `MEV_ENABLE_ESPEAK` | Real synthesis |
 | [PortAudio](http://www.portaudio.com/) | Real audio I/O | `MEV_ENABLE_PORTAUDIO` | Real I/O |
 | [libsamplerate](https://libsndfile.github.io/libsamplerate/) | ASR/TTS resampling | `MEV_ENABLE_LIBSAMPLERATE` | Real resampling |
@@ -419,7 +419,7 @@ Windows real-audio baseline config: `config/pipeline.windows.toml`
 - `asr.model_path = "models/ggml-small.bin"`
 - `asr.gpu_enabled = false`
 - `asr.quantization = "q5_1"`
-- `tts.engine = "espeak"`
+- `tts.engine = "piper"`
 - `tts.fallback_engine = "espeak"`
 
 ASR CPU/GPU behavior today:
@@ -427,6 +427,12 @@ ASR CPU/GPU behavior today:
 - CPU is the supported baseline for `config/pipeline.windows.toml`
 - GPU is optional
 - if `asr.gpu_enabled = true` and ASR warmup fails, the pipeline retries on CPU when `resilience.gpu_failure_action = "fallback_cpu"`
+
+TTS behavior today:
+
+- `piper` is the primary backend for `config/pipeline.windows.toml`
+- `espeak` remains the required fallback backend
+- if the primary TTS path fails during synthesis, the pipeline degrades and retries with `espeak`
 
 Current supported VAD values:
 
@@ -467,4 +473,4 @@ Any config field can be overridden after TOML load with `--<section>.<key> <valu
 | XTTSv2 | When stable ONNX export is available (`ITTSEngine` interface ready) |
 | macOS support | BlackHole virtual mic + CoreAudio backend |
 | Partial hypotheses | Streaming text output from Whisper for lower perceived latency |
-| piper-phonemize | Accurate text-to-phoneme conversion for Piper TTS (currently ASCII placeholder) |
+| piper-phonemize parity | Optional future upgrade for broader Piper voice compatibility beyond the current eSpeak/text phonemization path |

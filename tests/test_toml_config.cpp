@@ -84,14 +84,17 @@ static void test_load_windows_pipeline_toml() {
 
   assert(!cfg.runtime.use_simulated_audio &&
          "Windows config must opt into real audio");
-  assert(cfg.tts.engine == "espeak" &&
-         "Phase 4 Windows config must keep eSpeak as the real TTS baseline");
+  assert(cfg.tts.engine == "piper" &&
+         "Phase 5 Windows config must use Piper as the primary TTS backend");
+  assert(cfg.tts.fallback_engine == "espeak" &&
+         "Phase 5 Windows config must keep eSpeak as the fallback TTS backend");
   assert(!cfg.asr.enable_gpu &&
          "Windows config must default to CPU-friendly ASR in the current phase");
   assert(cfg.audio.output_device == "CABLE Input" &&
          "Windows config must target VB-Cable by default");
 
   std::cout << "[PASS] test_load_windows_pipeline_toml (tts=" << cfg.tts.engine
+            << " fallback=" << cfg.tts.fallback_engine
             << " gpu=" << cfg.asr.enable_gpu << ")\n";
 }
 

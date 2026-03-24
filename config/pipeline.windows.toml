@@ -36,7 +36,7 @@ stability_threshold = 0.72
 force_commit_ms     = 450
 
 [tts]
-engine             = "espeak"
+engine             = "piper"
 model_path         = "models/en_US-lessac-medium.onnx"
 piper_data_path    = "models/en_US-lessac-medium.onnx.json"
 speaker_id         = 0

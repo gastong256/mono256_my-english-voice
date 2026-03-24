@@ -303,13 +303,11 @@ bool PipelineOrchestrator::initialize_components() {
   ingest_resampler_ = std::make_unique<Resampler>();
   ingest_resampler_->initialize(
       16000.0 / static_cast<double>(config_.audio.sample_rate_hz), 1);
-
-  tts_resampler_ = std::make_unique<Resampler>();
-  tts_resampler_->initialize(
-      static_cast<double>(config_.audio.sample_rate_hz) /
-      static_cast<double>(config_.tts.output_sample_rate),
-      1);
 #endif
+
+  if (!configure_tts_resampler_for_active_engine()) {
+    return false;
+  }
 
   return true;
 }
@@ -356,6 +354,16 @@ bool PipelineOrchestrator::warmup_models() {
   }
 
   tts_engine_->warmup();
+  std::vector<float> tts_warmup_pcm;
+  if (!tts_engine_->synthesize("warmup", tts_warmup_pcm) || tts_warmup_pcm.empty()) {
+    MEV_LOG_ERROR("TTS warmup synthesis failed for engine='", tts_engine_->engine_name(), "'");
+    if (!activate_tts_fallback("warmup failure")) {
+      if (!config_.resilience.enable_degradation) return false;
+      MEV_LOG_WARN("degrading to MINIMAL mode after TTS warmup failure");
+      metrics_.inc_degradation_event();
+      transition_to_mode(PipelineMode::MINIMAL);
+    }
+  }
 
   const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - t0).count();
@@ -363,6 +371,43 @@ bool PipelineOrchestrator::warmup_models() {
 
   set_ready(true);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+bool PipelineOrchestrator::configure_tts_resampler_for_active_engine() {
+#if defined(MEV_ENABLE_LIBSAMPLERATE)
+  tts_resampler_ = std::make_unique<Resampler>();
+  const int source_rate = (tts_engine_ != nullptr)
+                              ? std::max(tts_engine_->output_sample_rate(), 1)
+                              : static_cast<int>(config_.tts.output_sample_rate);
+  return tts_resampler_->initialize(
+      static_cast<double>(config_.audio.sample_rate_hz) /
+          static_cast<double>(source_rate),
+      1);
+#else
+  return true;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+bool PipelineOrchestrator::activate_tts_fallback(const char* reason) {
+  if (!tts_fallback_engine_) {
+    MEV_LOG_ERROR("TTS fallback unavailable after ", reason);
+    return false;
+  }
+
+  if (tts_engine_ && tts_engine_->engine_name() == tts_fallback_engine_->engine_name()) {
+    return false;
+  }
+
+  MEV_LOG_WARN("switching TTS engine from '",
+               (tts_engine_ ? tts_engine_->engine_name() : std::string("unknown")),
+               "' to fallback '", tts_fallback_engine_->engine_name(),
+               "' after ", reason);
+  tts_engine_ = std::move(tts_fallback_engine_);
+  metrics_.inc_degradation_event();
+  transition_to_mode(PipelineMode::DEGRADED);
+  return configure_tts_resampler_for_active_engine();
 }
 
 // ---------------------------------------------------------------------------
@@ -819,7 +864,9 @@ void PipelineOrchestrator::tts_loop(std::stop_token token) {
       if (!ok && tts_fallback_engine_) {
         MEV_LOG_WARN("primary TTS failed; using fallback for id=", utt->id);
         ok = tts_fallback_engine_->synthesize(utt->normalized_text, utt->synth_pcm);
-        metrics_.inc_degradation_event();
+        if (ok) {
+          activate_tts_fallback("runtime synthesis failure");
+        }
       }
 
       if (!ok || utt->synth_pcm.empty()) {
