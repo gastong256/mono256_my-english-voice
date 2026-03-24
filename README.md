@@ -450,6 +450,8 @@ Windows real-audio baseline config: `config/pipeline.windows.toml`
 
 Windows smoke config for the lightweight preset: `config/pipeline.windows.smoke.toml`
 
+Windows real-audio preview config: `config/pipeline.windows.preview.toml`
+
 Windows CUDA validation config: `config/pipeline.windows.cuda.toml`
 
 - `runtime.use_simulated_audio = false`
@@ -479,8 +481,10 @@ TTS behavior today:
 - `espeak` remains the required fallback backend
 - `tts.mode = "interactive_balanced"` emits short speech chunks and falls back to the preview engine when the primary TTS budget is exceeded
 - `tts.mode = "interactive_preview"` treats `espeak` as the first-class low-latency live mode
+- the latency-first scheduler drops older partials when newer text arrives and keeps only the newest viable partial chunk under backlog
 - if the primary TTS path fails during synthesis, the pipeline degrades and retries with `espeak`
 - `config/pipeline.windows.smoke.toml` uses `espeak` as both primary and fallback so the smoke preset does not require ONNX Runtime
+- `config/pipeline.windows.preview.toml` is the real-audio preview preset with `espeak` as the primary live engine
 - `config/pipeline.windows.cuda.toml` requests GPU for both ASR and Piper so `--self-test` can report effective GPU/CPU placement on Windows
 
 Self-test diagnostics today:

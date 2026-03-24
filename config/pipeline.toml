@@ -7,7 +7,7 @@
 input_device       = "default"
 output_device      = "virtual_mic"
 sample_rate        = 16000
-frame_size         = 512
+frame_size         = 240
 channels           = 1
 input_ring_capacity  = 16384
 output_ring_capacity = 2048
@@ -57,13 +57,18 @@ enabled   = true
 hints_path = "config/pronunciation_hints.toml"
 
 [pipeline]
-max_queue_depth       = 8
+max_queue_depth       = 4
 drop_policy           = "drop_oldest"  # "drop_oldest" | "coalesce" | "none"
 max_latency_ms        = 3000
-warning_threshold_ms  = 2000
-critical_threshold_ms = 4000
-stale_after_n_newer   = 3
-stale_after_ms        = 3000
+warning_threshold_ms  = 1200
+critical_threshold_ms = 2200
+stale_after_n_newer   = 1
+stale_after_ms        = 1200
+
+[queues]
+ingest_to_asr_capacity = 32
+asr_to_text_capacity   = 32
+text_to_tts_capacity   = 32
 
 [gpu]
 enabled                        = true

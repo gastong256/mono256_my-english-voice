@@ -291,8 +291,11 @@ bool PipelineOrchestrator::initialize_components() {
   tts_scheduler_ = std::make_unique<TtsScheduler>(TtsSchedulerPolicy{
       .max_queue_depth     = config_.pipeline.max_queue_depth,
       .backlog_soft_limit  = static_cast<std::size_t>(config_.pipeline.max_queue_depth / 2U),
+      .partial_backlog_limit = 1U,
+      .output_backlog_limit  = config_.pipeline.max_queue_depth + 1U,
       .stale_after_ms      = config_.pipeline.stale_after_ms,
       .stale_after_n_newer = config_.pipeline.stale_after_n_newer,
+      .chunk_deadline_slack_ms = 30U,
       .drop_policy         = config_.pipeline.drop_policy,
   });
 
@@ -887,6 +890,8 @@ void PipelineOrchestrator::tts_loop(std::stop_token token) {
       utt->speech_chunks = chunk_text_for_realtime_tts(
           static_cast<SequenceNumber>(utt->id), utt->normalized_text, utt->asr_is_partial,
           Clock::now(), config_.tts.max_primary_tts_budget_ms);
+      utt->speech_chunks = tts_scheduler_->select_chunks_for_synthesis(
+          *utt, Clock::now(), tts_to_output_->size_approx());
 
       bool use_preview_for_remaining = start_with_preview;
       utt->tts_used_preview_engine = use_preview_for_remaining;
@@ -950,6 +955,12 @@ void PipelineOrchestrator::tts_loop(std::stop_token token) {
       };
 
       bool all_chunks_ok = !utt->speech_chunks.empty();
+      if (utt->asr_is_partial && utt->speech_chunks.empty()) {
+        metrics_.inc_stale_cancelled();
+        utt->state = UtteranceState::DROPPED;
+        if (use_gpu) gpu_scheduler_.tts_release();
+        continue;
+      }
       for (auto& chunk : utt->speech_chunks) {
         ITTSEngine* active_engine =
             (use_preview_for_remaining && tts_fallback_engine_)

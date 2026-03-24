@@ -17,7 +17,7 @@ struct AudioConfig {
   std::string input_device{"default"};
   std::string output_device{"virtual_mic"};
   std::uint32_t sample_rate_hz{48000};
-  std::uint32_t frames_per_buffer{480};
+  std::uint32_t frames_per_buffer{240};
   std::uint16_t input_channels{1};
   std::uint16_t output_channels{1};
   int input_device_id{-1};
@@ -83,12 +83,12 @@ struct TtsConfig {
 // QueueConfig — maps to [queues] in pipeline.toml (internal pipeline sizing)
 // ---------------------------------------------------------------------------
 struct QueueConfig {
-  std::size_t ingest_to_asr_capacity{128};
-  std::size_t asr_to_text_capacity{128};
-  std::size_t text_to_tts_capacity{128};
+  std::size_t ingest_to_asr_capacity{32};
+  std::size_t asr_to_text_capacity{32};
+  std::size_t text_to_tts_capacity{32};
   // Legacy alias for asr_to_commit (keeps old INI files working)
-  std::size_t asr_to_commit_capacity{128};
-  std::size_t commit_to_tts_capacity{128};
+  std::size_t asr_to_commit_capacity{32};
+  std::size_t commit_to_tts_capacity{32};
 };
 
 // ---------------------------------------------------------------------------
@@ -96,13 +96,13 @@ struct QueueConfig {
 // Controls backlog management and latency watchdog thresholds.
 // ---------------------------------------------------------------------------
 struct PipelineConfig {
-  std::size_t max_queue_depth{8};
+  std::size_t max_queue_depth{4};
   DropPolicy drop_policy{DropPolicy::kDropOldest};  // "drop_oldest", "coalesce", "none"
   std::uint32_t max_latency_ms{3000};
-  std::uint32_t warning_threshold_ms{2000};
-  std::uint32_t critical_threshold_ms{4000};
-  std::uint32_t stale_after_n_newer{3};
-  std::uint32_t stale_after_ms{3000};
+  std::uint32_t warning_threshold_ms{1200};
+  std::uint32_t critical_threshold_ms{2200};
+  std::uint32_t stale_after_n_newer{1};
+  std::uint32_t stale_after_ms{1200};
 };
 
 // ---------------------------------------------------------------------------

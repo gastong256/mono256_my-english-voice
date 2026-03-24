@@ -1,11 +1,13 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <vector>
 
 #include "mev/core/types.hpp"
 #include "mev/core/utterance.hpp"
+#include "mev/tts/tts_types.hpp"
 
 namespace mev {
 
@@ -25,8 +27,11 @@ enum class DropPolicy : std::uint8_t {
 struct TtsSchedulerPolicy {
   std::size_t max_queue_depth{8};         // hard cap: above this, apply drop_policy
   std::size_t backlog_soft_limit{4};      // above this: apply truncation hints
+  std::size_t partial_backlog_limit{2};   // partials are dropped more aggressively
+  std::size_t output_backlog_limit{6};    // pending audio blocks beyond this => prefer latest chunk only
   std::uint32_t stale_after_ms{3000};     // utterance older than this → stale
   std::uint32_t stale_after_n_newer{3};   // drop if N newer utterances exist in queue
+  std::uint32_t chunk_deadline_slack_ms{40};  // allow small scheduling jitter for chunk deadlines
 
   // TRADEOFF: kCoalesce reduces TTS calls but can increase utterance latency;
   // kDropOldest keeps latency bounded at the cost of dropped phrases.
@@ -58,6 +63,12 @@ class TtsScheduler {
   // Called immediately before synthesize() in the TTS worker loop.
   [[nodiscard]] bool should_cancel_as_stale(const Utterance& utterance, TimePoint now) const;
 
+  // Returns the speech chunks that should still be synthesized for this utterance.
+  // In interactive mode, stale or overdue partial chunks are skipped and the newest
+  // surviving partial chunk is preferred when output backlog is high.
+  [[nodiscard]] std::vector<SpeechChunk> select_chunks_for_synthesis(
+      const Utterance& utterance, TimePoint now, std::size_t output_queue_depth) const;
+
   // kCoalesce mode: flush buffered utterances into one if non-empty.
   [[nodiscard]] std::unique_ptr<Utterance> flush_coalesced();
 
@@ -65,6 +76,8 @@ class TtsScheduler {
 
  private:
   TtsSchedulerPolicy policy_;
+  std::atomic<std::uint64_t> latest_partial_utterance_id_{0};
+  std::atomic<std::uint64_t> latest_final_utterance_id_{0};
 
   // Pending coalesce buffer — used only in kCoalesce mode.
   std::vector<std::unique_ptr<Utterance>> coalesce_buffer_;

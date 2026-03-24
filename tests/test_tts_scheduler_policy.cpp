@@ -19,7 +19,20 @@ static std::unique_ptr<Utterance> make_utt(std::uint64_t id, const std::string& 
   u->normalized_text = text;
   u->metrics.capture_start = std::chrono::steady_clock::now();
   u->state = UtteranceState::NORMALIZING;
+  u->asr_is_partial = false;
   return u;
+}
+
+static mev::SpeechChunk make_chunk(std::uint64_t sequence, const std::string& text,
+                                   const bool is_partial,
+                                   const std::chrono::milliseconds offset_ms) {
+  mev::SpeechChunk chunk;
+  chunk.sequence = static_cast<mev::SequenceNumber>(sequence);
+  chunk.text = text;
+  chunk.is_partial = is_partial;
+  chunk.is_final = !is_partial;
+  chunk.deadline_at = std::chrono::steady_clock::now() + offset_ms;
+  return chunk;
 }
 
 // --- DropPolicy::kNone -------------------------------------------------------
@@ -60,6 +73,7 @@ static void test_drop_oldest_at_limit() {
   TtsScheduler sched(TtsSchedulerPolicy{
       .max_queue_depth    = 4,
       .backlog_soft_limit = 2,
+      .partial_backlog_limit = 1,
       .stale_after_ms     = 3000,
       .drop_policy        = DropPolicy::kDropOldest,
   });
@@ -67,6 +81,22 @@ static void test_drop_oldest_at_limit() {
   // At or beyond max_queue_depth — should drop (return nullptr).
   auto result = sched.schedule(make_utt(99, "text"), 4 /* == max_queue_depth */);
   assert(result == nullptr && "kDropOldest must return nullptr when at capacity");
+}
+
+static void test_drop_partial_more_aggressively() {
+  TtsScheduler sched(TtsSchedulerPolicy{
+      .max_queue_depth       = 4,
+      .backlog_soft_limit    = 2,
+      .partial_backlog_limit = 1,
+      .stale_after_ms        = 3000,
+      .drop_policy           = DropPolicy::kDropOldest,
+  });
+
+  auto partial = make_utt(7, "partial");
+  partial->asr_is_partial = true;
+  auto result = sched.schedule(std::move(partial), 1);
+  assert(result == nullptr &&
+         "partials should be dropped once the partial backlog limit is reached");
 }
 
 // --- DropPolicy::kCoalesce ---------------------------------------------------
@@ -154,14 +184,90 @@ static void test_stale_flag_override() {
          "is_stale=true must always trigger cancellation");
 }
 
+static void test_newer_partial_cancels_older_partial() {
+  TtsScheduler sched(TtsSchedulerPolicy{
+      .max_queue_depth       = 8,
+      .backlog_soft_limit    = 4,
+      .partial_backlog_limit = 2,
+      .stale_after_ms        = 3000,
+      .drop_policy           = DropPolicy::kDropOldest,
+  });
+
+  auto older = make_utt(10, "older partial");
+  older->asr_is_partial = true;
+  auto dispatched = sched.schedule(std::move(older), 0);
+  assert(dispatched != nullptr);
+
+  auto newer = make_utt(11, "newer partial");
+  newer->asr_is_partial = true;
+  auto newer_dispatched = sched.schedule(std::move(newer), 0);
+  assert(newer_dispatched != nullptr);
+
+  assert(sched.should_cancel_as_stale(*dispatched, std::chrono::steady_clock::now()) &&
+         "an older partial should be cancelled once a newer partial arrives");
+}
+
+static void test_select_chunks_prefers_latest_partial_when_backlogged() {
+  TtsScheduler sched(TtsSchedulerPolicy{
+      .max_queue_depth          = 8,
+      .backlog_soft_limit       = 4,
+      .partial_backlog_limit    = 2,
+      .output_backlog_limit     = 2,
+      .stale_after_ms           = 3000,
+      .stale_after_n_newer      = 3,
+      .chunk_deadline_slack_ms  = 20,
+      .drop_policy              = DropPolicy::kDropOldest,
+  });
+
+  Utterance utt;
+  utt.id = 20;
+  utt.asr_is_partial = true;
+  utt.speech_chunks.push_back(make_chunk(20, "first", true, std::chrono::milliseconds(50)));
+  utt.speech_chunks.push_back(make_chunk(20, "second", true, std::chrono::milliseconds(80)));
+
+  const auto selected = sched.select_chunks_for_synthesis(
+      utt, std::chrono::steady_clock::now(), 3);
+  assert(selected.size() == 1 &&
+         "partial utterances should keep only the latest chunk under backlog");
+  assert(selected.front().text == "second");
+}
+
+static void test_select_chunks_drops_overdue_partial_chunks() {
+  TtsScheduler sched(TtsSchedulerPolicy{
+      .max_queue_depth         = 8,
+      .backlog_soft_limit      = 4,
+      .partial_backlog_limit   = 2,
+      .output_backlog_limit    = 6,
+      .stale_after_ms          = 3000,
+      .stale_after_n_newer     = 3,
+      .chunk_deadline_slack_ms = 10,
+      .drop_policy             = DropPolicy::kDropOldest,
+  });
+
+  Utterance utt;
+  utt.id = 30;
+  utt.asr_is_partial = true;
+  utt.speech_chunks.push_back(make_chunk(30, "expired", true, std::chrono::milliseconds(-50)));
+  utt.speech_chunks.push_back(make_chunk(30, "fresh", true, std::chrono::milliseconds(50)));
+
+  const auto selected = sched.select_chunks_for_synthesis(
+      utt, std::chrono::steady_clock::now(), 0);
+  assert(selected.size() == 1);
+  assert(selected.front().text == "fresh");
+}
+
 int main() {
   test_none_always_passes();
   test_drop_oldest_under_limit();
   test_drop_oldest_at_limit();
+  test_drop_partial_more_aggressively();
   test_coalesce_buffers_until_drained();
   test_coalesce_flush_explicit();
   test_stale_detection_by_age();
   test_stale_detection_fresh();
   test_stale_flag_override();
+  test_newer_partial_cancels_older_partial();
+  test_select_chunks_prefers_latest_partial_when_backlogged();
+  test_select_chunks_drops_overdue_partial_chunks();
   return 0;
 }

@@ -1,7 +1,6 @@
 # =============================================================================
-# VoicePipeline — Windows smoke configuration
-# Intended for the lightweight Windows smoke preset from WSL2.
-# Keeps the path real-audio oriented while avoiding Piper/ONNX requirements.
+# VoicePipeline — Windows interactive preview configuration
+# Real audio, low buffering, and eSpeak-first live mode.
 # =============================================================================
 
 [audio]
@@ -73,11 +72,11 @@ asr_priority                   = true
 tts_cpu_fallback_on_contention = true
 
 [domain]
-glossary_path           = "config/tech_glossary.toml"
-session_terms_enabled   = true
-pronunciation_hints     = true
+glossary_path            = "config/tech_glossary.toml"
+session_terms_enabled    = true
+pronunciation_hints      = true
 pronunciation_hints_path = "config/pronunciation_hints.toml"
-initial_prompt_template = "Technical meeting about {topics}. Use simple English."
+initial_prompt_template  = "Technical meeting about {topics}. Use simple English."
 
 [resilience]
 enable_degradation           = true
@@ -86,7 +85,7 @@ passthrough_on_total_failure = true
 
 [logging]
 level   = "info"
-file    = "logs/pipeline-windows-smoke.log"
+file    = "logs/pipeline-windows-preview.log"
 console = true
 async   = true
 
@@ -97,4 +96,4 @@ log_per_utterance  = true
 
 [runtime]
 use_simulated_audio  = false
-run_duration_seconds = 3
+run_duration_seconds = 20

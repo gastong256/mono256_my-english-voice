@@ -136,9 +136,46 @@ static void test_load_windows_smoke_pipeline_toml() {
          "Windows smoke config must use interactive_preview mode");
   assert(cfg.runtime.run_duration_seconds == 3 &&
          "Windows smoke config should keep a short runtime by default");
+  assert(cfg.audio.frames_per_buffer == 160 &&
+         "Windows smoke config should use a low-latency audio buffer size");
 
   std::cout << "[PASS] test_load_windows_smoke_pipeline_toml (tts=" << cfg.tts.engine
             << " duration=" << cfg.runtime.run_duration_seconds << ")\n";
+}
+
+static void test_load_windows_preview_pipeline_toml() {
+  std::string path;
+  for (const auto& candidate : {
+           "config/pipeline.windows.preview.toml",
+           "../config/pipeline.windows.preview.toml",
+           "../../config/pipeline.windows.preview.toml",
+       }) {
+    if (std::filesystem::exists(candidate)) {
+      path = candidate;
+      break;
+    }
+  }
+
+  if (path.empty()) {
+    std::cout << "[SKIP] test_load_windows_preview_pipeline_toml: config/pipeline.windows.preview.toml not found\n";
+    return;
+  }
+
+  mev::AppConfig cfg = mev::default_config();
+  std::string error;
+  const bool ok = mev::load_config_from_file(path, cfg, error);
+  if (!ok) {
+    std::cerr << "[FAIL] test_load_windows_preview_pipeline_toml: " << error << "\n";
+    std::exit(1);
+  }
+
+  assert(cfg.tts.engine == "espeak");
+  assert(cfg.tts.mode == "interactive_preview");
+  assert(cfg.audio.frames_per_buffer == 160);
+  assert(cfg.pipeline.max_queue_depth == 4);
+
+  std::cout << "[PASS] test_load_windows_preview_pipeline_toml (tts=" << cfg.tts.engine
+            << " mode=" << cfg.tts.mode << ")\n";
 }
 
 static void test_load_windows_cuda_pipeline_toml() {
@@ -181,6 +218,10 @@ static void test_load_windows_cuda_pipeline_toml() {
          "Windows CUDA config must use the low-latency ASR hop size");
   assert(cfg.tts.mode == "interactive_balanced" &&
          "Windows CUDA config must use interactive_balanced mode");
+  assert(cfg.audio.frames_per_buffer == 160 &&
+         "Windows CUDA config must use a low-latency audio buffer size");
+  assert(cfg.pipeline.max_queue_depth == 4 &&
+         "Windows CUDA config must use the smaller interactive queue depth");
 
   std::cout << "[PASS] test_load_windows_cuda_pipeline_toml (asr_gpu=" << cfg.asr.enable_gpu
             << " tts_gpu=" << cfg.tts.enable_gpu << ")\n";
@@ -233,6 +274,7 @@ int main() {
   test_load_pipeline_toml();
   test_load_windows_pipeline_toml();
   test_load_windows_smoke_pipeline_toml();
+  test_load_windows_preview_pipeline_toml();
   test_load_windows_cuda_pipeline_toml();
   test_invalid_toml();
   test_missing_file();

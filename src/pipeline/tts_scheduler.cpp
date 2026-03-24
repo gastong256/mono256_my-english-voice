@@ -14,6 +14,12 @@ std::unique_ptr<Utterance> TtsScheduler::schedule(std::unique_ptr<Utterance> utt
     return nullptr;
   }
 
+  if (utterance->asr_is_partial) {
+    latest_partial_utterance_id_.store(utterance->id, std::memory_order_release);
+  } else {
+    latest_final_utterance_id_.store(utterance->id, std::memory_order_release);
+  }
+
   switch (policy_.drop_policy) {
     // ----------------------------------------------------------------
     case DropPolicy::kNone:
@@ -22,6 +28,12 @@ std::unique_ptr<Utterance> TtsScheduler::schedule(std::unique_ptr<Utterance> utt
 
     // ----------------------------------------------------------------
     case DropPolicy::kDropOldest:
+      if (utterance->asr_is_partial &&
+          current_queue_depth >= policy_.partial_backlog_limit) {
+        utterance->state = UtteranceState::DROPPED;
+        utterance->is_stale = true;
+        return nullptr;
+      }
       if (current_queue_depth >= policy_.max_queue_depth) {
         utterance->state = UtteranceState::DROPPED;
         utterance->is_stale = true;
@@ -32,6 +44,16 @@ std::unique_ptr<Utterance> TtsScheduler::schedule(std::unique_ptr<Utterance> utt
 
     // ----------------------------------------------------------------
     case DropPolicy::kCoalesce: {
+      if (utterance->asr_is_partial) {
+        if (current_queue_depth >= policy_.partial_backlog_limit) {
+          utterance->state = UtteranceState::DROPPED;
+          utterance->is_stale = true;
+          return nullptr;
+        }
+        utterance->state = UtteranceState::QUEUED_FOR_TTS;
+        return utterance;
+      }
+
       // Buffer utterances until the queue drains below the soft limit.
       coalesce_buffer_.push_back(std::move(utterance));
 
@@ -60,7 +82,54 @@ bool TtsScheduler::should_cancel_as_stale(const Utterance& utterance,
   const auto age_ms =
       std::chrono::duration_cast<std::chrono::milliseconds>(now - utterance.metrics.capture_start)
           .count();
-  return age_ms > static_cast<long long>(policy_.stale_after_ms);
+  if (age_ms > static_cast<long long>(policy_.stale_after_ms)) {
+    return true;
+  }
+
+  if (utterance.asr_is_partial) {
+    const auto newest_partial =
+        latest_partial_utterance_id_.load(std::memory_order_acquire);
+    const auto newest_final =
+        latest_final_utterance_id_.load(std::memory_order_acquire);
+    if ((newest_partial > utterance.id) || (newest_final > utterance.id)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+std::vector<SpeechChunk> TtsScheduler::select_chunks_for_synthesis(
+    const Utterance& utterance, const TimePoint now,
+    const std::size_t output_queue_depth) const {
+  if (utterance.speech_chunks.empty()) {
+    return {};
+  }
+
+  std::vector<SpeechChunk> selected;
+  selected.reserve(utterance.speech_chunks.size());
+
+  const auto slack = std::chrono::milliseconds(
+      static_cast<int>(policy_.chunk_deadline_slack_ms));
+  for (const auto& chunk : utterance.speech_chunks) {
+    if (utterance.asr_is_partial &&
+        chunk.deadline_at != TimePoint{} &&
+        (now > (chunk.deadline_at + slack))) {
+      continue;
+    }
+    selected.push_back(chunk);
+  }
+
+  if (selected.empty()) {
+    return selected;
+  }
+
+  if (utterance.asr_is_partial &&
+      (output_queue_depth >= policy_.output_backlog_limit || selected.size() > 1U)) {
+    return {selected.back()};
+  }
+
+  return selected;
 }
 
 std::unique_ptr<Utterance> TtsScheduler::flush_coalesced() {
