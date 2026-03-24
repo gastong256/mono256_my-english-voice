@@ -1,0 +1,90 @@
+# =============================================================================
+# VoicePipeline — Windows runtime configuration
+# Intended for native Windows execution with real audio devices.
+# =============================================================================
+
+[audio]
+input_device         = "default"
+output_device        = "CABLE Input"
+sample_rate          = 16000
+frame_size           = 512
+channels             = 1
+input_ring_capacity  = 16384
+output_ring_capacity = 2048
+
+[vad]
+engine                = "none"
+threshold             = 0.5
+silence_duration_ms   = 300
+max_chunk_duration_ms = 3000
+leading_pad_ms        = 200
+trailing_pad_ms       = 300
+
+[asr]
+engine              = "whisper"
+model_path          = "models/ggml-small.bin"
+language            = "es"
+translate           = true
+beam_size           = 1
+gpu_enabled         = false
+quantization        = "q5_1"
+use_domain_prompt   = true
+max_context_tokens  = 224
+chunk_ms            = 640
+hop_ms              = 240
+stability_threshold = 0.72
+force_commit_ms     = 450
+
+[tts]
+engine             = "espeak"
+model_path         = "models/en_US-lessac-medium.onnx"
+piper_data_path    = "models/en_US-lessac-medium.onnx.json"
+speaker_id         = 0
+gpu_enabled        = false
+output_sample_rate = 22050
+fallback_engine    = "espeak"
+
+[tts.pronunciation_hints]
+enabled    = true
+hints_path = "config/pronunciation_hints.toml"
+
+[pipeline]
+max_queue_depth       = 8
+drop_policy           = "drop_oldest"
+max_latency_ms        = 3000
+warning_threshold_ms  = 2000
+critical_threshold_ms = 4000
+stale_after_n_newer   = 3
+stale_after_ms        = 3000
+
+[gpu]
+enabled                        = false
+device_id                      = 0
+asr_priority                   = true
+tts_cpu_fallback_on_contention = true
+
+[domain]
+glossary_path           = "config/tech_glossary.toml"
+session_terms_enabled   = true
+pronunciation_hints     = true
+initial_prompt_template = "Technical discussion about {topics}"
+
+[resilience]
+enable_degradation           = true
+gpu_failure_action           = "fallback_cpu"
+passthrough_on_total_failure = true
+
+[logging]
+level   = "info"
+file    = "logs/pipeline-windows.log"
+console = true
+async   = true
+
+[telemetry]
+enabled            = true
+report_interval_ms = 5000
+log_per_utterance  = true
+
+[runtime]
+use_simulated_audio  = false
+run_duration_seconds = 20

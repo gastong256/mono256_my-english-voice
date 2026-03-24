@@ -23,7 +23,11 @@ static int espeak_pcm_callback(short* wav, int numsamples, espeak_EVENT* events)
 
 namespace mev {
 
-bool EspeakTTSEngine::initialize(const TTSConfig& /*config*/, std::string& /*error*/) {
+bool EspeakTTSEngine::initialize(const TTSConfig& /*config*/, std::string& error) {
+  if (initialized_) {
+    return true;
+  }
+
 #if defined(MEV_ENABLE_ESPEAK)
   const int rate = espeak_Initialize(AUDIO_OUTPUT_SYNCHRONOUS, 0, nullptr,
                                      espeakINITIALIZE_DONT_EXIT);
@@ -42,16 +46,23 @@ bool EspeakTTSEngine::initialize(const TTSConfig& /*config*/, std::string& /*err
   MEV_LOG_INFO("EspeakTTSEngine initialised, sample_rate=", sample_rate_);
   return true;
 #else
-  initialized_ = true;
-  MEV_LOG_INFO("EspeakTTSEngine initialised as STUB "
-               "(compile with MEV_ENABLE_ESPEAK=ON for real synthesis)");
-  return true;
+  error = "EspeakTTSEngine: espeak-ng not compiled in (MEV_ENABLE_ESPEAK=OFF)";
+  MEV_LOG_ERROR(error);
+  return false;
 #endif
 }
 
 void EspeakTTSEngine::warmup() {
-  // eSpeak has near-zero cold start — no warmup needed.
-  MEV_LOG_INFO("EspeakTTSEngine warmup (no-op)");
+  if (!initialized_) {
+    return;
+  }
+
+  std::vector<float> pcm;
+  if (!synthesize("warmup", pcm)) {
+    MEV_LOG_WARN("EspeakTTSEngine warmup failed");
+    return;
+  }
+  MEV_LOG_INFO("EspeakTTSEngine warmup done (generated ", pcm.size(), " samples)");
 }
 
 bool EspeakTTSEngine::synthesize(const std::string& text, std::vector<float>& pcm_out) {
@@ -80,12 +91,16 @@ bool EspeakTTSEngine::synthesize(const std::string& text, std::vector<float>& pc
   espeak_Synchronize();  // wait for completion
 
   pcm_out = std::move(g_espeak_pcm_out);
+  if (pcm_out.empty()) {
+    MEV_LOG_ERROR("EspeakTTSEngine: synthesize produced empty PCM");
+    return false;
+  }
   return true;
 #else
-  // Stub: silence proportional to text length.
-  const std::size_t approx_samples = (text.size() / 5U + 1U) * (16000U / 10U);
-  pcm_out.assign(approx_samples, 0.0F);
-  return true;
+  (void)text;
+  pcm_out.clear();
+  MEV_LOG_ERROR("EspeakTTSEngine: synthesize requested but espeak-ng is not compiled in");
+  return false;
 #endif
 }
 

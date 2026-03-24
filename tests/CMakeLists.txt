@@ -41,6 +41,10 @@ if(MEV_ENABLE_PORTAUDIO)
   add_mev_test(test_portaudio_enum test_portaudio_enum.cpp)
 endif()
 
+if(MEV_ENABLE_ESPEAK)
+  add_mev_test(test_espeak_tts test_espeak_tts.cpp)
+endif()
+
 if(MEV_ENABLE_ONNXRUNTIME)
   add_mev_test(test_piper_tts test_piper_tts.cpp)
 endif()

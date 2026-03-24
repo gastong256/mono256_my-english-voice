@@ -15,10 +15,8 @@ namespace mev {
 //   Latency: ~50-150ms GPU, ~100-300ms CPU per phrase
 //   Output: 22050 Hz mono float32
 //
-// Implementation status: STUB — loads and validates config; synthesize()
-// returns silence until ONNX Runtime is linked in the build.
-//
-// To activate: set MEV_ENABLE_ONNXRUNTIME=ON in CMake and link onnxruntime.
+// When MEV_ENABLE_ONNXRUNTIME is OFF, initialize() fails with a clear error so
+// callers can explicitly fall back to another backend.
 // ---------------------------------------------------------------------------
 class PiperTTSEngine final : public ITTSEngine {
  public:

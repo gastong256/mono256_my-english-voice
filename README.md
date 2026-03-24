@@ -323,6 +323,7 @@ wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/me
 3. In Google Meet / Zoom / Teams, select **CABLE Output** as the microphone.
 
 > **Tip:** Use `--audio.output_device "CABLE Input"` on the CLI to override without editing the TOML.
+> Phase 3 Windows config: use `config/pipeline.windows.toml` as the baseline real-audio config.
 
 ### Linux — PipeWire (recommended)
 
@@ -369,8 +370,17 @@ sudo modprobe snd-aloop
 # Basic run with default config
 ./build/debug/apps/voice_mic/mev_voice_mic
 
+# Validate the selected config, models, audio backend, ASR, and TTS
+./build/debug/apps/voice_mic/mev_voice_mic --self-test --config config/pipeline.toml
+
+# List PortAudio devices
+./build/debug/apps/voice_mic/mev_voice_mic --list-devices both
+
 # Specify config file
 ./build/debug/apps/voice_mic/mev_voice_mic --config config/pipeline.toml
+
+# Windows real-audio config
+./build/debug/apps/voice_mic/mev_voice_mic --config config/pipeline.windows.toml
 
 # Override individual fields after TOML load
 ./build/debug/apps/voice_mic/mev_voice_mic \
@@ -399,6 +409,13 @@ Press **Ctrl+C** to stop cleanly (SIGINT triggers graceful shutdown).
 
 Main config: `config/pipeline.toml` — parsed by toml++ (resolved via package, local source override, or FetchContent depending on `MEV_FETCH_DEPS`).
 
+Windows real-audio baseline config: `config/pipeline.windows.toml`
+
+- `runtime.use_simulated_audio = false`
+- `audio.output_device = "CABLE Input"`
+- `tts.engine = "espeak"`
+- `tts.fallback_engine = "espeak"`
+
 Current supported VAD values:
 
 - `none`: fixed-window chunking path
@@ -419,6 +436,7 @@ Any config field can be overridden after TOML load with `--<section>.<key> <valu
 
 ```bash
 --audio.input_device "HDA Intel PCH"
+--audio.output_device "CABLE Input"
 --audio.sample_rate_hz 48000
 --asr.model_path models/ggml-tiny.bin
 --tts.engine espeak

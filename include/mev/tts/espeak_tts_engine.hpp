@@ -13,9 +13,8 @@ namespace mev {
 // Ultra-fast (~5ms per phrase), robotic quality, no GPU dependency.
 // Used in MINIMAL degradation mode when Piper fails to load.
 //
-// Implementation status: STUB — returns silence until libespeak-ng is linked.
-//
-// To activate: link espeak-ng and implement the synthesis call in .cpp.
+// When MEV_ENABLE_ESPEAK is OFF, initialize() fails with a clear error so
+// callers can fall back to another backend or surface an actionable message.
 // ---------------------------------------------------------------------------
 class EspeakTTSEngine final : public ITTSEngine {
  public:
@@ -25,7 +24,7 @@ class EspeakTTSEngine final : public ITTSEngine {
   bool initialize(const TTSConfig& config, std::string& error) override;
   void warmup() override;
   [[nodiscard]] bool synthesize(const std::string& text, std::vector<float>& pcm_out) override;
-  [[nodiscard]] int output_sample_rate() const override { return 16000; }
+  [[nodiscard]] int output_sample_rate() const override { return sample_rate_; }
   [[nodiscard]] std::string engine_name() const override { return "espeak"; }
   void shutdown() override;
 

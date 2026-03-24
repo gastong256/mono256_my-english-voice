@@ -24,15 +24,9 @@ bool PiperTTSEngine::initialize(const TTSConfig& config, std::string& error) {
   MEV_LOG_ERROR("PiperTTSEngine: ONNX Runtime not compiled in (MEV_ENABLE_ONNXRUNTIME=OFF)");
   return false;
 #else
-  // Stub path: validate file existence for early failure detection.
-  if (!config.model_path.empty() && !std::filesystem::exists(config.model_path)) {
-    MEV_LOG_WARN("PiperTTSEngine: model not found at '", config.model_path,
-                 "' — running as stub (silence output)");
-  }
-  (void)error;
-  initialized_ = true;
-  MEV_LOG_INFO("PiperTTSEngine initialised as STUB (compile with MEV_ENABLE_ONNXRUNTIME=ON for real inference)");
-  return true;
+  error = "PiperTTSEngine: ONNX Runtime not compiled in (MEV_ENABLE_ONNXRUNTIME=OFF)";
+  MEV_LOG_ERROR(error);
+  return false;
 #endif
 }
 
@@ -60,10 +54,9 @@ bool PiperTTSEngine::synthesize(const std::string& text, std::vector<float>& pcm
   pcm_out.clear();
   return false;
 #else
-  // Stub: output silence for the approximate duration of the text.
-  const std::size_t approx_samples = (text.size() / 5U + 1U) * 1800U;
-  pcm_out.assign(approx_samples, 0.0F);
-  return true;
+  (void)text;
+  pcm_out.clear();
+  return false;
 #endif
 }
 
