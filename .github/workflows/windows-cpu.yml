@@ -1,0 +1,46 @@
+name: windows-cpu
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+
+      - name: Bootstrap Windows dependencies
+        shell: pwsh
+        run: |
+          ./scripts/windows/setup-dev.ps1 -RepoRoot $PWD.Path
+
+      - name: Build Windows smoke preset
+        shell: pwsh
+        run: |
+          ./scripts/windows/build.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-smoke
+
+      - name: Run Windows smoke tests
+        shell: pwsh
+        run: |
+          ./scripts/windows/test.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-smoke
+
+      - name: Run Windows self-test with simulated audio
+        shell: pwsh
+        run: |
+          ./scripts/windows/self-test.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-smoke -ConfigPath config/pipeline.windows.smoke.toml -AppArgs @('--runtime.use_simulated_audio', 'true')
+
+      - name: Run short Windows smoke session with simulated audio
+        shell: pwsh
+        run: |
+          ./scripts/windows/run.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-smoke -ConfigPath config/pipeline.windows.smoke.toml -AppArgs @('--runtime.use_simulated_audio', 'true', '--runtime.run_duration_seconds', '2')

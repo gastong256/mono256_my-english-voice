@@ -19,6 +19,7 @@ add_mev_test(test_domain_corrections   test_domain_corrections.cpp)
 add_mev_test(test_gpu_scheduler        test_gpu_scheduler.cpp)
 add_mev_test(test_pipeline_shutdown    test_pipeline_shutdown.cpp)
 add_mev_test(test_runtime_backend_selection test_runtime_backend_selection.cpp)
+add_mev_test(test_voice_mic_cli_contract test_voice_mic_cli_contract.cpp)
 
 # Phase 2 integration tests
 # Always compiled: TOML config parser test
@@ -43,6 +44,7 @@ endif()
 
 if(MEV_ENABLE_ESPEAK)
   add_mev_test(test_espeak_tts test_espeak_tts.cpp)
+  add_mev_test(test_tts_fallback_contract test_tts_fallback_contract.cpp)
 endif()
 
 if(MEV_ENABLE_ONNXRUNTIME)
