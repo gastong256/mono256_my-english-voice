@@ -146,6 +146,17 @@ function Get-MevExecutablePath {
   return (Join-Path $RepoRoot "build\$Preset\apps\voice_mic\mev_voice_mic.exe")
 }
 
+function Get-MevBenchmarkExecutablePath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$Preset
+  )
+
+  return (Join-Path $RepoRoot "build\$Preset\benchmarks\benchmark_pipeline_latency.exe")
+}
+
 function Resolve-MevConfigPath {
   param(
     [Parameter(Mandatory = $true)]

@@ -53,6 +53,7 @@ models/
 
 # Runtime logs
 logs/
+artifacts/benchmarks/
 
 # Editor / IDE
 .vscode/

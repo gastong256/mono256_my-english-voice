@@ -502,6 +502,13 @@ Domain translation quality tooling today:
 - `eval/score_domain_eval.py` scores local predictions and can emit a manual review CSV
 - `eval/baseline_status.md` documents the oracle sanity baseline and the remaining real-model evaluation step
 
+Windows latency benchmarking today:
+
+- `scripts/windows/benchmark-latency.ps1` is the official Windows benchmark entrypoint
+- `scripts/wsl/windows-benchmark.sh` is the WSL2 wrapper for that workflow
+- benchmark artifacts are written under `artifacts/benchmarks/<timestamp>/`
+- the workflow runs a synthetic scheduler benchmark plus short real-app sessions for `interactive_preview` and `interactive_balanced`
+
 Current supported VAD values:
 
 - `none`: fixed-window chunking path
