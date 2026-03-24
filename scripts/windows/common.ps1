@@ -61,6 +61,18 @@ function Get-MevDefaultVcpkgRoot {
   return (Join-Path $RepoRoot ".local\vcpkg")
 }
 
+function Test-MevVsBundledVcpkgRoot {
+  param(
+    [string]$Path
+  )
+
+  if (-not $Path) {
+    return $false
+  }
+
+  return $Path -match '\\Microsoft Visual Studio\\.+\\VC\\vcpkg\\?$'
+}
+
 function Get-MevDefaultOnnxRuntimeRoot {
   param(
     [Parameter(Mandatory = $true)]
@@ -104,7 +116,11 @@ function Set-MevBuildEnvironment {
 
   if (-not $VcpkgRoot) {
     if ($env:VCPKG_ROOT) {
-      $VcpkgRoot = $env:VCPKG_ROOT
+      if (Test-MevVsBundledVcpkgRoot -Path $env:VCPKG_ROOT) {
+        $VcpkgRoot = Get-MevDefaultVcpkgRoot -RepoRoot $RepoRoot
+      } else {
+        $VcpkgRoot = $env:VCPKG_ROOT
+      }
     } else {
       $VcpkgRoot = Get-MevDefaultVcpkgRoot -RepoRoot $RepoRoot
     }
