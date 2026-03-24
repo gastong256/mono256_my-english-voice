@@ -34,6 +34,12 @@ namespace mev {
 //  PASSTHROUGH: audio from mic passed directly to virtual output, no processing
 //               Triggered by: total failure of all inference backends
 // ---------------------------------------------------------------------------
+// wingdi.h (pulled in transitively on Windows) defines PASSTHROUGH as the GDI
+// printer escape code 19. Undefine it here so the enumerator is not replaced
+// by a numeric literal, which would cause a compile error under /WX.
+#ifdef PASSTHROUGH
+#undef PASSTHROUGH
+#endif
 enum class PipelineMode : std::uint8_t {
   NORMAL,
   DEGRADED,
