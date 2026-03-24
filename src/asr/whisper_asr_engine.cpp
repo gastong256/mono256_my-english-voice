@@ -5,8 +5,14 @@
 
 namespace mev {
 
-WhisperASREngine::WhisperASREngine(const std::string& model_path, bool enable_gpu)
-    : model_path_(model_path), enable_gpu_(enable_gpu) {}
+WhisperASREngine::WhisperASREngine(const std::string& model_path, bool enable_gpu,
+                                   std::string language, bool translate,
+                                   std::string quantization)
+    : model_path_(model_path),
+      enable_gpu_(enable_gpu),
+      language_(std::move(language)),
+      translate_(translate),
+      quantization_(std::move(quantization)) {}
 
 WhisperASREngine::~WhisperASREngine() {
 #if defined(MEV_ENABLE_WHISPER_CPP)
@@ -19,6 +25,12 @@ WhisperASREngine::~WhisperASREngine() {
 
 bool WhisperASREngine::warmup(std::string& error) {
 #if defined(MEV_ENABLE_WHISPER_CPP)
+  if (model_path_.empty()) {
+    error = "WhisperASREngine: model path is empty";
+    MEV_LOG_ERROR(error);
+    return false;
+  }
+
   if (ctx_ != nullptr) {
     whisper_free(ctx_);
     ctx_ = nullptr;
@@ -35,7 +47,10 @@ bool WhisperASREngine::warmup(std::string& error) {
   }
 
   MEV_LOG_INFO("WhisperASREngine: model loaded from '", model_path_,
-               "' gpu=", enable_gpu_);
+               "' gpu=", enable_gpu_,
+               " language=", language_,
+               " translate=", translate_,
+               " quantization=", quantization_);
   return true;
 #else
   MEV_LOG_WARN("WhisperASREngine: whisper.cpp not compiled (MEV_ENABLE_WHISPER_CPP=OFF)");
@@ -62,8 +77,8 @@ AsrPartialHypothesis WhisperASREngine::transcribe_incremental(const AsrRequest& 
   if (n_samples == 0) return result;
 
   whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-  params.language          = "es";
-  params.translate         = true;
+  params.language          = language_.c_str();
+  params.translate         = translate_;
   params.no_timestamps     = true;
   params.single_segment    = true;
   params.print_progress    = false;

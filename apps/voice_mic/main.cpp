@@ -108,13 +108,13 @@ static bool make_audio_backends(const mev::AppConfig& cfg,
 #endif
 }
 
-static std::unique_ptr<mev::IASREngine> make_asr_engine(const mev::AppConfig& cfg) {
 #if defined(MEV_ENABLE_WHISPER_CPP)
-  return std::make_unique<mev::WhisperASREngine>(cfg.asr.model_path, cfg.asr.enable_gpu);
-#else
-  return std::make_unique<mev::WhisperAsrStub>(cfg.asr.model_path, cfg.asr.enable_gpu);
-#endif
+static std::unique_ptr<mev::IASREngine> make_asr_engine(const mev::AppConfig& cfg) {
+  return std::make_unique<mev::WhisperASREngine>(
+      cfg.asr.model_path, cfg.asr.enable_gpu, cfg.asr.language,
+      cfg.asr.translate, cfg.asr.quantization);
 }
+#endif
 
 static std::unique_ptr<mev::ITTSEngine> make_tts_engine(const std::string& engine_name,
                                                         const mev::AppConfig& cfg,
@@ -240,12 +240,39 @@ static bool validate_audio_backend(const mev::AppConfig& cfg, std::string& error
 }
 
 static bool validate_asr_backend(const mev::AppConfig& cfg, std::string& error) {
+#if !defined(MEV_ENABLE_WHISPER_CPP)
+  (void)cfg;
+  error = "whisper.cpp is not compiled in (MEV_ENABLE_WHISPER_CPP=OFF)";
+  return false;
+#else
   auto engine = make_asr_engine(cfg);
   if (!engine) {
     error = "failed to create ASR engine";
     return false;
   }
-  return engine->warmup(error);
+
+  if (engine->warmup(error)) {
+    return true;
+  }
+
+  if (cfg.asr.enable_gpu && cfg.resilience.gpu_failure_action == "fallback_cpu") {
+    std::cerr << "[WARN] ASR GPU warmup failed, retrying on CPU\n";
+    auto cpu_cfg = cfg;
+    cpu_cfg.asr.enable_gpu = false;
+    if (cpu_cfg.asr.quantization == "f16") {
+      cpu_cfg.asr.quantization = "q5_1";
+    }
+
+    auto cpu_engine = make_asr_engine(cpu_cfg);
+    if (!cpu_engine) {
+      error = "failed to create CPU fallback ASR engine";
+      return false;
+    }
+    return cpu_engine->warmup(error);
+  }
+
+  return false;
+#endif
 }
 
 static bool validate_tts_backend(const mev::AppConfig& cfg, std::string& error) {

@@ -56,6 +56,45 @@ static void test_load_pipeline_toml() {
             << " tts=" << cfg.tts.engine << ")\n";
 }
 
+static void test_load_windows_pipeline_toml() {
+  std::string path;
+  for (const auto& candidate : {
+           "config/pipeline.windows.toml",
+           "../config/pipeline.windows.toml",
+           "../../config/pipeline.windows.toml",
+       }) {
+    if (std::filesystem::exists(candidate)) {
+      path = candidate;
+      break;
+    }
+  }
+
+  if (path.empty()) {
+    std::cout << "[SKIP] test_load_windows_pipeline_toml: config/pipeline.windows.toml not found\n";
+    return;
+  }
+
+  mev::AppConfig cfg = mev::default_config();
+  std::string error;
+  const bool ok = mev::load_config_from_file(path, cfg, error);
+  if (!ok) {
+    std::cerr << "[FAIL] test_load_windows_pipeline_toml: " << error << "\n";
+    std::exit(1);
+  }
+
+  assert(!cfg.runtime.use_simulated_audio &&
+         "Windows config must opt into real audio");
+  assert(cfg.tts.engine == "espeak" &&
+         "Phase 4 Windows config must keep eSpeak as the real TTS baseline");
+  assert(!cfg.asr.enable_gpu &&
+         "Windows config must default to CPU-friendly ASR in the current phase");
+  assert(cfg.audio.output_device == "CABLE Input" &&
+         "Windows config must target VB-Cable by default");
+
+  std::cout << "[PASS] test_load_windows_pipeline_toml (tts=" << cfg.tts.engine
+            << " gpu=" << cfg.asr.enable_gpu << ")\n";
+}
+
 static void test_invalid_toml() {
   // Write a temp file with broken TOML.
   const std::string tmp = "/tmp/mev_test_invalid.toml";
@@ -101,6 +140,7 @@ static void test_validate_catches_bad_range() {
 int main() {
   test_default_config();
   test_load_pipeline_toml();
+  test_load_windows_pipeline_toml();
   test_invalid_toml();
   test_missing_file();
   test_validate_catches_bad_range();

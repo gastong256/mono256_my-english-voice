@@ -139,6 +139,15 @@ bool initialize_vad_engine(const AppConfig& config, std::unique_ptr<IVadEngine>&
   return false;
 }
 
+std::unique_ptr<IASREngine> make_asr_engine(const AsrConfig& cfg) {
+#if defined(MEV_ENABLE_WHISPER_CPP)
+  return std::make_unique<WhisperASREngine>(
+      cfg.model_path, cfg.enable_gpu, cfg.language, cfg.translate, cfg.quantization);
+#else
+  return std::make_unique<WhisperAsrStub>(cfg.model_path, cfg.enable_gpu);
+#endif
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -240,9 +249,9 @@ bool PipelineOrchestrator::initialize_components() {
 
   // ASR — whisper.cpp when compiled in, stub otherwise.
 #if defined(MEV_ENABLE_WHISPER_CPP)
-  asr_engine_ = std::make_unique<WhisperASREngine>(config_.asr.model_path, config_.asr.enable_gpu);
+  asr_engine_ = make_asr_engine(config_.asr);
 #else
-  asr_engine_ = std::make_unique<WhisperAsrStub>(config_.asr.model_path, config_.asr.enable_gpu);
+  asr_engine_ = make_asr_engine(config_.asr);
 #endif
 
   // TTS engine selection.
@@ -312,9 +321,38 @@ bool PipelineOrchestrator::warmup_models() {
   std::string error;
   if (!asr_engine_->warmup(error)) {
     MEV_LOG_ERROR("ASR warmup failed: ", error);
-    if (!config_.resilience.enable_degradation) return false;
-    MEV_LOG_WARN("degrading to MINIMAL mode after ASR warmup failure");
-    transition_to_mode(PipelineMode::MINIMAL);
+
+    if (config_.asr.enable_gpu &&
+        config_.resilience.gpu_failure_action == "fallback_cpu") {
+      MEV_LOG_WARN("retrying ASR warmup on CPU after GPU warmup failure");
+      metrics_.inc_degradation_event();
+
+      auto cpu_cfg = config_.asr;
+      cpu_cfg.enable_gpu = false;
+      if (cpu_cfg.quantization == "f16") {
+        cpu_cfg.quantization = "q5_1";
+      }
+
+      asr_engine_ = make_asr_engine(cpu_cfg);
+      std::string cpu_error;
+      if (asr_engine_->warmup(cpu_error)) {
+        config_.asr = cpu_cfg;
+        transition_to_mode(PipelineMode::DEGRADED);
+        MEV_LOG_WARN("ASR running in CPU fallback mode "
+                     "(gpu=false quantization=", config_.asr.quantization, ")");
+      } else {
+        MEV_LOG_ERROR("ASR CPU fallback warmup failed: ", cpu_error);
+        if (!config_.resilience.enable_degradation) return false;
+        MEV_LOG_WARN("degrading to MINIMAL mode after ASR warmup failure");
+        metrics_.inc_degradation_event();
+        transition_to_mode(PipelineMode::MINIMAL);
+      }
+    } else {
+      if (!config_.resilience.enable_degradation) return false;
+      MEV_LOG_WARN("degrading to MINIMAL mode after ASR warmup failure");
+      metrics_.inc_degradation_event();
+      transition_to_mode(PipelineMode::MINIMAL);
+    }
   }
 
   tts_engine_->warmup();

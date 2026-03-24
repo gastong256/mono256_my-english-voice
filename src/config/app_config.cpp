@@ -297,6 +297,18 @@ bool validate_config(const AppConfig& config, std::string& error) {
     return false;
   }
 
+  if (config.asr.engine != "whisper") {
+    error = "asr.engine must be 'whisper'";
+    return false;
+  }
+
+  if (config.asr.quantization != "f16" &&
+      config.asr.quantization != "q5_1" &&
+      config.asr.quantization != "q8_0") {
+    error = "asr.quantization must be one of: f16, q5_1, q8_0";
+    return false;
+  }
+
   if (config.asr.chunk_ms > 0 && config.asr.hop_ms > 0 &&
       config.asr.hop_ms > config.asr.chunk_ms) {
     error = "asr.hop_ms must be <= asr.chunk_ms";

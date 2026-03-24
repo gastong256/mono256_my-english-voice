@@ -23,7 +23,9 @@ namespace mev {
 // ---------------------------------------------------------------------------
 class WhisperASREngine final : public IASREngine {
  public:
-  WhisperASREngine(const std::string& model_path, bool enable_gpu);
+  WhisperASREngine(const std::string& model_path, bool enable_gpu,
+                   std::string language = "es", bool translate = true,
+                   std::string quantization = "f16");
   ~WhisperASREngine() override;
 
   bool warmup(std::string& error) override;
@@ -43,6 +45,9 @@ class WhisperASREngine final : public IASREngine {
 #endif
   std::string model_path_;
   bool enable_gpu_;
+  std::string language_;
+  bool translate_;
+  std::string quantization_;
   std::string domain_prompt_;
   std::atomic<std::uint64_t> inference_count_{0};
 };

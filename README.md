@@ -251,7 +251,7 @@ Run these from WSL2 only when the repo lives under `/mnt/<drive>/...`:
 ```bash
 ./scripts/wsl/windows-build.sh --preset windows-msvc-debug
 ./scripts/wsl/windows-test.sh --preset windows-msvc-debug
-./scripts/wsl/windows-run.sh --preset windows-msvc-debug --config config/pipeline.toml
+./scripts/wsl/windows-run.sh --preset windows-msvc-debug
 ```
 
 The WSL2 wrappers:
@@ -373,6 +373,9 @@ sudo modprobe snd-aloop
 # Validate the selected config, models, audio backend, ASR, and TTS
 ./build/debug/apps/voice_mic/mev_voice_mic --self-test --config config/pipeline.toml
 
+# Validate the Windows real-audio baseline
+./build/debug/apps/voice_mic/mev_voice_mic --self-test --config config/pipeline.windows.toml
+
 # List PortAudio devices
 ./build/debug/apps/voice_mic/mev_voice_mic --list-devices both
 
@@ -413,8 +416,17 @@ Windows real-audio baseline config: `config/pipeline.windows.toml`
 
 - `runtime.use_simulated_audio = false`
 - `audio.output_device = "CABLE Input"`
+- `asr.model_path = "models/ggml-small.bin"`
+- `asr.gpu_enabled = false`
+- `asr.quantization = "q5_1"`
 - `tts.engine = "espeak"`
 - `tts.fallback_engine = "espeak"`
+
+ASR CPU/GPU behavior today:
+
+- CPU is the supported baseline for `config/pipeline.windows.toml`
+- GPU is optional
+- if `asr.gpu_enabled = true` and ASR warmup fails, the pipeline retries on CPU when `resilience.gpu_failure_action = "fallback_cpu"`
 
 Current supported VAD values:
 

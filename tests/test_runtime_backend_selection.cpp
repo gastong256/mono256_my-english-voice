@@ -32,6 +32,23 @@ static void test_validate_rejects_unsupported_vad_engine() {
   assert(error.find("vad.engine") != std::string::npos);
 }
 
+static void test_validate_rejects_unsupported_asr_contract() {
+  AppConfig cfg = default_config();
+  cfg.asr.engine = "custom-asr";
+
+  std::string error;
+  const bool engine_ok = validate_config(cfg, error);
+  assert(!engine_ok && "unsupported ASR engines must be rejected");
+  assert(error.find("asr.engine") != std::string::npos);
+
+  cfg = default_config();
+  cfg.asr.quantization = "int4";
+  error.clear();
+  const bool quant_ok = validate_config(cfg, error);
+  assert(!quant_ok && "unsupported ASR quantization values must be rejected");
+  assert(error.find("asr.quantization") != std::string::npos);
+}
+
 static void test_simulated_audio_path_starts() {
   AppConfig cfg = default_config();
   cfg.runtime.use_simulated_audio = true;
@@ -71,6 +88,7 @@ static void test_real_audio_requires_portaudio_build() {
 int main() {
   test_default_runtime_contract();
   test_validate_rejects_unsupported_vad_engine();
+  test_validate_rejects_unsupported_asr_contract();
   test_simulated_audio_path_starts();
   test_real_audio_requires_portaudio_build();
   return 0;

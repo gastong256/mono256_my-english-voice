@@ -2,7 +2,7 @@
 param(
   [string]$RepoRoot,
   [string]$Preset = "windows-msvc-debug",
-  [string]$ConfigPath = "config/pipeline.toml",
+  [string]$ConfigPath = "config/pipeline.windows.toml",
   [string]$VcpkgRoot,
   [string]$OnnxRuntimeRoot,
   [switch]$BuildFirst,

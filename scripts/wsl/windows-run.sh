@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_windows_common.sh"
 
 preset="windows-msvc-debug"
-config_path="config/pipeline.toml"
+config_path="config/pipeline.windows.toml"
 declare -a app_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -24,7 +24,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 [--preset windows-msvc-debug] [--config config/pipeline.toml] [-- app args...]" >&2
+      echo "Usage: $0 [--preset windows-msvc-debug] [--config config/pipeline.windows.toml] [-- app args...]" >&2
       exit 1
       ;;
   esac
