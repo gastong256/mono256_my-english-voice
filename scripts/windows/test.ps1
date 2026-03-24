@@ -26,6 +26,15 @@ if ($BuildFirst) {
   }
 }
 
+# whisper/ggml shared DLLs land in build/<preset>/bin.  Prepend that
+# directory to PATH so every test binary — and any child processes they
+# spawn via std::system() — can resolve the DLLs at runtime.
+$buildBinDir = Join-Path $repoRoot "build" $Preset "bin"
+if (Test-Path $buildBinDir) {
+  $env:PATH = "$buildBinDir;$env:PATH"
+  Write-Host "==> DLL search path: $buildBinDir"
+}
+
 $arguments = @("--preset", $Preset, "--output-on-failure")
 if ($CTestArgs.Count -gt 0) {
   $arguments += $CTestArgs

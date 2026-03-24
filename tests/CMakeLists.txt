@@ -8,14 +8,13 @@ function(add_mev_test name)
   # fails to exit) from blocking CI indefinitely.
   set_tests_properties(${name} PROPERTIES TIMEOUT 120)
   if(WIN32)
-    # On Windows, DLLs are not automatically found by executables in sibling
-    # directories. mev.dll lands in $<TARGET_FILE_DIR:mev> (typically src/) and
-    # whisper/ggml DLLs land in ${CMAKE_BINARY_DIR}/bin (set by whisper.cpp).
-    # ENVIRONMENT_MODIFICATION prepends these to PATH for the test process and
-    # all child processes it spawns (e.g. std::system() calls in CLI tests).
-    set_tests_properties(${name} PROPERTIES
-      ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:$<TARGET_FILE_DIR:mev>\;PATH=path_list_prepend:${CMAKE_BINARY_DIR}/bin"
+    # whisper.cpp sets RUNTIME_OUTPUT_DIRECTORY to ${CMAKE_BINARY_DIR}/bin, so
+    # whisper.dll, ggml-base.dll, and ggml-cpu.dll all land there.  mev is a
+    # static library and produces no DLL.  Prepend bin/ to PATH so test
+    # binaries and any child processes they spawn (e.g. std::system() calls in
+    # CLI tests) can resolve these shared libraries at runtime.
+    set_property(TEST ${name} APPEND PROPERTY
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${CMAKE_BINARY_DIR}/bin"
     )
   endif()
 endfunction()
