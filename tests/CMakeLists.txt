@@ -4,6 +4,20 @@ function(add_mev_test name)
   mev_set_warnings(${name})
   mev_enable_sanitizers(${name})
   add_test(NAME ${name} COMMAND ${name})
+  # Hard timeout: prevents runaway tests (e.g. if a subprocess or pipeline loop
+  # fails to exit) from blocking CI indefinitely.
+  set_tests_properties(${name} PROPERTIES TIMEOUT 120)
+  if(WIN32)
+    # On Windows, DLLs are not automatically found by executables in sibling
+    # directories. mev.dll lands in $<TARGET_FILE_DIR:mev> (typically src/) and
+    # whisper/ggml DLLs land in ${CMAKE_BINARY_DIR}/bin (set by whisper.cpp).
+    # ENVIRONMENT_MODIFICATION prepends these to PATH for the test process and
+    # all child processes it spawns (e.g. std::system() calls in CLI tests).
+    set_tests_properties(${name} PROPERTIES
+      ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:mev>\;PATH=path_list_prepend:${CMAKE_BINARY_DIR}/bin"
+    )
+  endif()
 endfunction()
 
 # Existing tests
