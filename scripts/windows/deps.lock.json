@@ -10,9 +10,19 @@
     }
   },
   "vcpkg_packages": [
-    "portaudio:x64-windows",
-    "espeak-ng:x64-windows",
-    "libsamplerate:x64-windows"
+    {
+      "name": "portaudio:x64-windows",
+      "required": true
+    },
+    {
+      "name": "espeak-ng:x64-windows",
+      "required": false,
+      "note": "Some vcpkg Windows registries do not ship this port. Provide ESPEAK_ROOT manually if you need MEV_ENABLE_ESPEAK=ON."
+    },
+    {
+      "name": "libsamplerate:x64-windows",
+      "required": true
+    }
   ],
   "models": [
     {

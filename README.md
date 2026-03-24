@@ -251,12 +251,18 @@ The setup script:
 - downloads pinned models into `models/`
 - writes `.local/windows-dev-env.ps1` with `VCPKG_ROOT` and `ONNXRUNTIME_ROOT`
 
+Note:
+
+- eSpeak on Windows may require a manual `ESPEAK_ROOT` installation if the active `vcpkg` registry does not provide `espeak-ng:x64-windows`
+- the GitHub Actions workflows therefore use a CI-safe preset plus `stub` TTS overrides for automated smoke and latency checks
+
 ### Windows presets
 
 - `windows-msvc-debug`: Windows debug build with `vcpkg` toolchain and fetchable deps enabled
 - `windows-msvc-release`: Windows release build with `vcpkg` toolchain and fetchable deps enabled
 - `windows-msvc-full`: enables all current real backend flags
 - `windows-msvc-smoke`: lightweight Windows smoke build with `PortAudio`, `Whisper`, and `eSpeak`
+- `windows-msvc-ci`: CI-safe Windows preset with benchmarks enabled and no eSpeak dependency
 
 All Windows presets read:
 

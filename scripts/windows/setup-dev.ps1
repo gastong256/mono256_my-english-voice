@@ -44,6 +44,41 @@ foreach ($model in $depsLock.models) {
   }
 }
 
+function Invoke-MevVcpkgInstall {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$VcpkgExe,
+    [Parameter(Mandatory = $true)]
+    [psobject]$PackageSpec
+  )
+
+  $packageName = [string]$PackageSpec.name
+  $required = $true
+  if ($null -ne $PackageSpec.required) {
+    $required = [bool]$PackageSpec.required
+  }
+
+  $packageNote = ""
+  if ($null -ne $PackageSpec.note) {
+    $packageNote = [string]$PackageSpec.note
+  }
+
+  Write-Host "==> Installing vcpkg package: $packageName"
+  & $VcpkgExe install $packageName
+  if ($LASTEXITCODE -eq 0) {
+    return
+  }
+
+  if ($required) {
+    throw "Required vcpkg package failed to install: $packageName"
+  }
+
+  Write-Warning "Optional vcpkg package failed to install: $packageName"
+  if ($packageNote) {
+    Write-Warning $packageNote
+  }
+}
+
 $bootstrap = Join-Path $vcpkgRoot "bootstrap-vcpkg.bat"
 $vcpkgExe = Join-Path $vcpkgRoot "vcpkg.exe"
 $vcpkgToolchain = Join-Path $vcpkgRoot "scripts\buildsystems\vcpkg.cmake"
@@ -86,7 +121,9 @@ if (-not $SkipPackageInstall) {
     throw "vcpkg.exe not found at $vcpkgExe. Run setup without -SkipVcpkgInstall first."
   }
 
-  Invoke-MevStep -Description "Installing native packages via vcpkg" -Command $vcpkgExe -Arguments (@("install") + @($depsLock.vcpkg_packages))
+  foreach ($packageSpec in $depsLock.vcpkg_packages) {
+    Invoke-MevVcpkgInstall -VcpkgExe $vcpkgExe -PackageSpec $packageSpec
+  }
 }
 
 if (-not $SkipOnnxDownload) {
@@ -147,3 +184,5 @@ Write-Host "  2. .\scripts\windows\build.ps1 -Preset windows-msvc-full"
 Write-Host "  3. .\scripts\windows\self-test.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.toml"
 Write-Host "  4. .\scripts\windows\self-test.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.cuda.toml"
 Write-Host "  5. .\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.toml"
+Write-Host ""
+Write-Host "Note: eSpeak on Windows may require a manual ESPEAK_ROOT install if the vcpkg port is unavailable."

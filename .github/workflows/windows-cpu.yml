@@ -28,19 +28,19 @@ jobs:
       - name: Build Windows smoke preset
         shell: pwsh
         run: |
-          ./scripts/windows/build.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-smoke
+          ./scripts/windows/build.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-ci
 
       - name: Run Windows smoke tests
         shell: pwsh
         run: |
-          ./scripts/windows/test.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-smoke
+          ./scripts/windows/test.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-ci
 
       - name: Run Windows self-test with simulated audio
         shell: pwsh
         run: |
-          ./scripts/windows/self-test.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-smoke -ConfigPath config/pipeline.windows.smoke.toml -AppArgs @('--runtime.use_simulated_audio', 'true')
+          ./scripts/windows/self-test.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-ci -ConfigPath config/pipeline.windows.smoke.toml -AppArgs @('--runtime.use_simulated_audio', 'true', '--tts.engine', 'stub', '--tts.fallback_engine', 'stub', '--tts.preview_engine', 'stub')
 
       - name: Run short Windows smoke session with simulated audio
         shell: pwsh
         run: |
-          ./scripts/windows/run.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-smoke -ConfigPath config/pipeline.windows.smoke.toml -AppArgs @('--runtime.use_simulated_audio', 'true', '--runtime.run_duration_seconds', '2')
+          ./scripts/windows/run.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-ci -ConfigPath config/pipeline.windows.smoke.toml -AppArgs @('--runtime.use_simulated_audio', 'true', '--runtime.run_duration_seconds', '2', '--tts.engine', 'stub', '--tts.fallback_engine', 'stub', '--tts.preview_engine', 'stub')

@@ -30,17 +30,17 @@ jobs:
       - name: Build Windows full preset
         shell: pwsh
         run: |
-          ./scripts/windows/build.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-full
+          ./scripts/windows/build.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-ci
 
       - name: Run Windows latency benchmark with simulated audio
         shell: pwsh
         run: |
           ./scripts/windows/benchmark-latency.ps1 `
             -RepoRoot $PWD.Path `
-            -Preset windows-msvc-full `
+            -Preset windows-msvc-ci `
             -ArtifactRoot (Join-Path $PWD.Path 'artifacts\benchmarks\github-actions') `
             -ConfigPaths @('config/pipeline.windows.preview.toml', 'config/pipeline.windows.toml') `
-            -AppArgs @('--runtime.use_simulated_audio', 'true')
+            -AppArgs @('--runtime.use_simulated_audio', 'true', '--tts.engine', 'stub', '--tts.fallback_engine', 'stub', '--tts.preview_engine', 'stub')
 
       - name: Check latency guardrails
         shell: pwsh

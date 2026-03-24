@@ -156,6 +156,12 @@ Resultado esperado:
 - no hay errores
 - ves un resumen final con `VCPKG_ROOT`, `ONNXRUNTIME_ROOT` y siguientes pasos
 
+Nota importante sobre eSpeak en Windows:
+
+- el repo intenta provisionarlo si la registry actual de `vcpkg` lo soporta
+- si el port no existe en tu entorno, `setup-dev.ps1` sigue adelante y te deja el resto del host listo
+- en ese caso, para builds con `MEV_ENABLE_ESPEAK=ON` debes provisionar `ESPEAK_ROOT` manualmente o usar un preset sin eSpeak
+
 Carga luego el helper local:
 
 ```powershell
@@ -185,6 +191,18 @@ Usa este preset para pruebas reales con:
 ```
 
 Usa este preset solo si quieres aislar problemas y validar el camino mas liviano.
+
+### 7.3 Build CI-Safe
+
+```powershell
+.\scripts\windows\build.ps1 -Preset windows-msvc-ci
+```
+
+Usa este preset si quieres reproducir el mismo contrato que usa GitHub Actions:
+
+- Whisper habilitado
+- benchmarks habilitados
+- sin dependencia de eSpeak en Windows
 
 ## 8. Validaciones Iniciales Obligatorias
 

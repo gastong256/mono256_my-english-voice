@@ -100,6 +100,14 @@
         "MEV_ENABLE_WHISPER_CPP": "ON",
         "MEV_ENABLE_ESPEAK": "ON"
       }
+    },
+    {
+      "name": "windows-msvc-ci",
+      "inherits": ["windows-msvc-debug"],
+      "cacheVariables": {
+        "MEV_ENABLE_WHISPER_CPP": "ON",
+        "MEV_BUILD_BENCHMARKS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -130,6 +138,10 @@
     {
       "name": "windows-msvc-smoke",
       "configurePreset": "windows-msvc-smoke"
+    },
+    {
+      "name": "windows-msvc-ci",
+      "configurePreset": "windows-msvc-ci"
     }
   ],
   "testPresets": [
@@ -157,6 +169,13 @@
     {
       "name": "windows-msvc-full",
       "configurePreset": "windows-msvc-full",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-ci",
+      "configurePreset": "windows-msvc-ci",
       "output": {
         "outputOnFailure": true
       }
