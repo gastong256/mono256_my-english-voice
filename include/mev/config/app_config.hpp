@@ -52,12 +52,11 @@ struct AsrConfig {
   std::string quantization{"f16"};       // "f16", "q5_1", "q8_0"
   bool use_domain_prompt{true};
   std::uint32_t max_context_tokens{224};
-  // TODO(next): partial hypothesis support — interface stub ready
-  // Legacy chunking params (kept for compatibility; overridden by VAD when enabled)
-  std::uint32_t chunk_ms{640};
-  std::uint32_t hop_ms{240};
-  float stability_threshold{0.72F};
-  std::uint32_t force_commit_ms{450};
+  // Latency-first chunking defaults for rolling incremental ASR.
+  std::uint32_t chunk_ms{120};
+  std::uint32_t hop_ms{60};
+  float stability_threshold{0.65F};
+  std::uint32_t force_commit_ms{180};
 };
 
 // ---------------------------------------------------------------------------

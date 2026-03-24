@@ -20,6 +20,7 @@ add_mev_test(test_gpu_scheduler        test_gpu_scheduler.cpp)
 add_mev_test(test_pipeline_shutdown    test_pipeline_shutdown.cpp)
 add_mev_test(test_runtime_backend_selection test_runtime_backend_selection.cpp)
 add_mev_test(test_voice_mic_cli_contract test_voice_mic_cli_contract.cpp)
+add_mev_test(test_asr_incremental_contract test_asr_incremental_contract.cpp)
 
 # Always compiled: config parser and public CLI contract tests
 add_mev_test(test_toml_config test_toml_config.cpp)

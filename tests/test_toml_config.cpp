@@ -171,6 +171,10 @@ static void test_load_windows_cuda_pipeline_toml() {
          "Windows CUDA config must enable the shared GPU scheduler");
   assert(cfg.tts.engine == "piper" &&
          "Windows CUDA config must keep Piper as the primary TTS backend");
+  assert(cfg.asr.chunk_ms == 120 &&
+         "Windows CUDA config must use the low-latency ASR chunk size");
+  assert(cfg.asr.hop_ms == 60 &&
+         "Windows CUDA config must use the low-latency ASR hop size");
 
   std::cout << "[PASS] test_load_windows_cuda_pipeline_toml (asr_gpu=" << cfg.asr.enable_gpu
             << " tts_gpu=" << cfg.tts.enable_gpu << ")\n";

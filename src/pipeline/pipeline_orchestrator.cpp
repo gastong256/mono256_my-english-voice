@@ -597,6 +597,7 @@ void PipelineOrchestrator::ingest_loop(std::stop_token token) {
           utt->metrics.capture_start = capture_time;
           utt->metrics.capture_end   = Clock::now();
           utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
+          utt->stream_continues      = true;
           utt->source_pcm.assign(
               rolling_pcm.begin() + static_cast<long long>(consumed_offset),
               rolling_pcm.begin() + static_cast<long long>(consumed_offset + chunk_samples));
@@ -623,6 +624,7 @@ void PipelineOrchestrator::ingest_loop(std::stop_token token) {
           utt->metrics.capture_start = capture_time;
           utt->metrics.capture_end   = Clock::now();
           utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
+          utt->stream_continues      = true;
           utt->source_pcm.assign(pcm_16k, pcm_16k + chunk_samples);
           if (!ingest_to_asr_->try_push(std::move(utt))) {
             metrics_.inc_queue_drop();
@@ -690,6 +692,7 @@ void PipelineOrchestrator::ingest_loop(std::stop_token token) {
               utt->metrics.capture_start = capture_time;
               utt->metrics.capture_end   = Clock::now();
               utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
+              utt->stream_continues      = false;
               utt->source_pcm           = std::move(speech_buffer);
               if (!ingest_to_asr_->try_push(std::move(utt))) {
                 metrics_.inc_queue_drop();
@@ -716,6 +719,7 @@ void PipelineOrchestrator::ingest_loop(std::stop_token token) {
             utt->metrics.capture_start = capture_time;
             utt->metrics.capture_end   = Clock::now();
             utt->asr_prompt_hint       = domain_adapter_->generate_asr_prompt();
+            utt->stream_continues      = true;
             utt->source_pcm           = std::move(speech_buffer);
             if (!ingest_to_asr_->try_push(std::move(utt))) {
               metrics_.inc_queue_drop();
@@ -772,11 +776,17 @@ void PipelineOrchestrator::asr_loop(std::stop_token token) {
       req.created_at  = utt->metrics.capture_start;
       req.sample_rate = 16000;  // ingest loop resamples to 16kHz
       req.prompt_hint = utt->asr_prompt_hint;
+      req.stream_continues = utt->stream_continues;
       req.mono_pcm    = utt->source_pcm;
 
       auto partial = asr_engine_->transcribe_incremental(req);
-      utt->source_text     = partial.source_text_es;
-      utt->translated_text = partial.translated_text_en;
+      utt->source_text          = partial.source_text_es;
+      utt->translated_text      = partial.translated_text_en;
+      utt->raw_translated_text  = partial.raw_translated_text_en;
+      utt->stable_prefix_text   = partial.stable_prefix_en;
+      utt->asr_stability        = partial.stability;
+      utt->asr_revision         = partial.revision;
+      utt->asr_is_partial       = partial.is_partial;
     }
 
     utt->metrics.asr_end = Clock::now();

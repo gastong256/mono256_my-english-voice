@@ -1,9 +1,89 @@
 #include "mev/asr/whisper_asr_engine.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <vector>
+
 #include "mev/core/logger.hpp"
 #include "mev/core/time.hpp"
 
 namespace mev {
+
+#if defined(MEV_ENABLE_WHISPER_CPP)
+
+namespace {
+
+std::string normalize_whitespace(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+
+  bool in_space = true;
+  for (const unsigned char ch : text) {
+    if (std::isspace(ch) != 0) {
+      if (!in_space) {
+        out.push_back(' ');
+        in_space = true;
+      }
+      continue;
+    }
+    out.push_back(static_cast<char>(ch));
+    in_space = false;
+  }
+
+  if (!out.empty() && out.back() == ' ') {
+    out.pop_back();
+  }
+  return out;
+}
+
+std::vector<std::string> split_tokens(const std::string& text) {
+  std::vector<std::string> tokens;
+  std::size_t start = 0;
+  while (start < text.size()) {
+    const auto end = text.find(' ', start);
+    if (end == std::string::npos) {
+      tokens.push_back(text.substr(start));
+      break;
+    }
+    tokens.push_back(text.substr(start, end - start));
+    start = end + 1;
+  }
+  return tokens;
+}
+
+std::string join_tokens(const std::vector<std::string>& tokens, const std::size_t begin,
+                        const std::size_t end) {
+  if (begin >= end || begin >= tokens.size() || end > tokens.size()) {
+    return {};
+  }
+
+  std::string joined;
+  for (std::size_t i = begin; i < end; ++i) {
+    if (!joined.empty()) joined.push_back(' ');
+    joined += tokens[i];
+  }
+  return joined;
+}
+
+std::size_t suffix_prefix_overlap(const std::vector<std::string>& left,
+                                  const std::vector<std::string>& right) {
+  const auto max_overlap = std::min(left.size(), right.size());
+  for (std::size_t k = max_overlap; k > 0; --k) {
+    if (std::equal(left.end() - static_cast<std::ptrdiff_t>(k), left.end(), right.begin())) {
+      return k;
+    }
+  }
+  return 0;
+}
+
+float overlap_stability(const std::size_t overlap, const std::size_t denom) {
+  if (denom == 0) return 0.0F;
+  return std::clamp(static_cast<float>(overlap) / static_cast<float>(denom), 0.0F, 0.95F);
+}
+
+}  // namespace
+
+#endif
 
 WhisperASREngine::WhisperASREngine(const std::string& model_path, bool enable_gpu,
                                    std::string language, bool translate,
@@ -85,10 +165,12 @@ bool WhisperASREngine::warmup(std::string& error) {
 
 AsrPartialHypothesis WhisperASREngine::transcribe_incremental(const AsrRequest& request) {
   AsrPartialHypothesis result{};
-  result.sequence        = request.sequence;
-  result.created_at      = Clock::now();
-  result.stability       = 0.0F;
-  result.end_of_utterance = true;
+  result.sequence          = request.sequence;
+  result.created_at        = Clock::now();
+  result.stability         = 0.0F;
+  result.is_partial        = request.stream_continues;
+  result.end_of_utterance  = !request.stream_continues;
+  result.revision          = ++revision_;
 
 #if defined(MEV_ENABLE_WHISPER_CPP)
   if (ctx_ == nullptr) {
@@ -141,9 +223,68 @@ AsrPartialHypothesis WhisperASREngine::transcribe_incremental(const AsrRequest& 
     prev_tokens_.push_back(whisper_full_get_token_id(ctx_, 0, i));
   }
 
-  result.translated_text_en = std::move(text);
-  result.stability          = 0.95F;
-  result.end_of_utterance   = true;
+  const std::string raw_text = normalize_whitespace(text);
+  const auto current_tokens  = split_tokens(raw_text);
+  const auto previous_tokens = split_tokens(last_raw_translation_en_);
+  auto committed_tokens      = split_tokens(committed_translation_en_);
+
+  if (!translate_) {
+    result.source_text_es = raw_text;
+  }
+
+  std::vector<std::string> commit_candidate_tokens;
+  std::size_t overlap = 0;
+
+  if (!raw_text.empty() && raw_text == last_raw_translation_en_) {
+    ++repeated_hypothesis_count_;
+  } else {
+    repeated_hypothesis_count_ = raw_text.empty() ? 0U : 1U;
+  }
+
+  if (!request.stream_continues) {
+    commit_candidate_tokens = current_tokens;
+    overlap = current_tokens.size();
+  } else if (!previous_tokens.empty() && !current_tokens.empty()) {
+    overlap = suffix_prefix_overlap(previous_tokens, current_tokens);
+    const bool exact_repeat = (raw_text == last_raw_translation_en_);
+    const bool enough_overlap =
+        overlap >= 2U || (overlap == 1U && std::max(previous_tokens.size(), current_tokens.size()) <= 2U);
+    if (enough_overlap || exact_repeat || repeated_hypothesis_count_ >= 2U) {
+      commit_candidate_tokens = previous_tokens;
+      if (exact_repeat || repeated_hypothesis_count_ >= 2U) {
+        overlap = previous_tokens.size();
+      }
+    }
+  }
+
+  if (!commit_candidate_tokens.empty()) {
+    const auto committed_overlap = suffix_prefix_overlap(committed_tokens, commit_candidate_tokens);
+    if (committed_overlap < commit_candidate_tokens.size()) {
+      committed_tokens.insert(committed_tokens.end(),
+                              commit_candidate_tokens.begin() +
+                                  static_cast<std::ptrdiff_t>(committed_overlap),
+                              commit_candidate_tokens.end());
+      result.translated_text_en = join_tokens(
+          commit_candidate_tokens, committed_overlap, commit_candidate_tokens.size());
+      committed_translation_en_ = join_tokens(committed_tokens, 0, committed_tokens.size());
+    }
+    result.stable_prefix_en = join_tokens(commit_candidate_tokens, 0, commit_candidate_tokens.size());
+  } else {
+    result.stable_prefix_en = committed_translation_en_;
+  }
+
+  result.raw_translated_text_en = raw_text;
+  if (!result.end_of_utterance) {
+    result.stability = overlap_stability(overlap, std::max(previous_tokens.size(), current_tokens.size()));
+  } else {
+    result.stability = raw_text.empty() ? 0.0F : 1.0F;
+  }
+
+  last_raw_translation_en_ = raw_text;
+
+  if (result.end_of_utterance) {
+    reset_context();
+  }
 
   inference_count_.fetch_add(1, std::memory_order_relaxed);
   return result;
@@ -161,6 +302,10 @@ void WhisperASREngine::reset_context() {
 #if defined(MEV_ENABLE_WHISPER_CPP)
   prev_tokens_.clear();
 #endif
+  last_raw_translation_en_.clear();
+  committed_translation_en_.clear();
+  revision_ = 0;
+  repeated_hypothesis_count_ = 0;
 }
 
 }  // namespace mev

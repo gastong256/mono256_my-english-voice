@@ -31,10 +31,10 @@ gpu_enabled         = true
 quantization        = "f16"
 use_domain_prompt   = true
 max_context_tokens  = 224
-chunk_ms            = 640
-hop_ms              = 240
-stability_threshold = 0.72
-force_commit_ms     = 450
+chunk_ms            = 120
+hop_ms              = 60
+stability_threshold = 0.65
+force_commit_ms     = 180
 
 [tts]
 engine             = "piper"

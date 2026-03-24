@@ -88,6 +88,12 @@ struct Utterance {
   // -- ASR results --
   std::string source_text;      // raw Spanish text (if ASR uses separate transcribe + translate passes)
   std::string translated_text;  // English text from Whisper translate mode
+  std::string raw_translated_text;  // full current partial/raw hypothesis
+  std::string stable_prefix_text;   // stable text confirmed by the ASR engine
+  float asr_stability{0.0F};
+  std::uint64_t asr_revision{0};
+  bool asr_is_partial{true};
+  bool stream_continues{false};
 
   // -- Text processing results --
   std::string normalized_text;  // after domain correction + pronunciation hints

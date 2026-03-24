@@ -56,6 +56,10 @@ class WhisperASREngine final : public IASREngine {
   bool warmed_up_{false};
   std::string runtime_summary_{"provider=uninitialized"};
   std::atomic<std::uint64_t> inference_count_{0};
+  std::string last_raw_translation_en_;
+  std::string committed_translation_en_;
+  std::uint64_t revision_{0};
+  std::size_t repeated_hypothesis_count_{0};
 };
 
 }  // namespace mev

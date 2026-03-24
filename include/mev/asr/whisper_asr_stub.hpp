@@ -23,6 +23,10 @@ class WhisperAsrStub final : public IASREngine {
   std::string model_path_;
   bool enable_gpu_;
   std::atomic<std::uint64_t> counter_{0};
+  std::string last_raw_translation_en_;
+  std::string committed_translation_en_;
+  std::uint64_t revision_{0};
+  std::size_t partial_step_{0};
 };
 
 }  // namespace mev

@@ -459,6 +459,13 @@ Windows CUDA validation config: `config/pipeline.windows.cuda.toml`
 - `asr.quantization = "q5_1"`
 - `tts.engine = "piper"`
 - `tts.fallback_engine = "espeak"`
+- low-latency rolling ASR defaults now use `chunk_ms = 120` and `hop_ms = 60`
+
+ASR partial behavior today:
+
+- `vad.engine = "none"` uses rolling overlapping chunks tuned for lower text TTFT
+- the ASR worker emits stable partial deltas before end-of-utterance when overlap confirms them
+- final chunks still flush the remaining text with `end_of_utterance = true`
 
 ASR CPU/GPU behavior today:
 
