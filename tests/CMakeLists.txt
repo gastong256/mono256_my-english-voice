@@ -21,8 +21,7 @@ add_mev_test(test_pipeline_shutdown    test_pipeline_shutdown.cpp)
 add_mev_test(test_runtime_backend_selection test_runtime_backend_selection.cpp)
 add_mev_test(test_voice_mic_cli_contract test_voice_mic_cli_contract.cpp)
 
-# Phase 2 integration tests
-# Always compiled: TOML config parser test
+# Always compiled: config parser and public CLI contract tests
 add_mev_test(test_toml_config test_toml_config.cpp)
 
 # Conditionally compiled: real backend tests (skip gracefully when libs absent)

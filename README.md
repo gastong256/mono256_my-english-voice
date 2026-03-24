@@ -167,7 +167,7 @@ export ONNXRUNTIME_ROOT=$(pwd)/onnxruntime-linux-x64-gpu-1.17.3
 
 ### Windows — ONNX Runtime
 
-The Phase 1 bootstrap script downloads the pinned ONNX Runtime package into `.local/onnxruntime/`.
+The Windows bootstrap script downloads the pinned ONNX Runtime package into `.local/onnxruntime/`.
 
 ---
 
@@ -208,14 +208,15 @@ cmake -B build/release \
 cmake --build build/release -j$(nproc)
 ```
 
-### Phase 1 bootstrap — Windows
+### Windows bootstrap
 
 Open PowerShell in the repo root and run:
 
 ```powershell
 .\scripts\windows\setup-dev.ps1
-.\scripts\windows\build.ps1 -Preset windows-msvc-debug
-.\scripts\windows\test.ps1 -Preset windows-msvc-debug
+.\scripts\windows\build.ps1 -Preset windows-msvc-full
+.\scripts\windows\self-test.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.toml
+.\scripts\windows\run.ps1 -Preset windows-msvc-full -ConfigPath config/pipeline.windows.toml
 ```
 
 The setup script:
@@ -316,7 +317,7 @@ ctest --preset debug --output-on-failure
 
 ## Download models
 
-Phase 1 bootstrap on Windows already downloads the pinned model set via `scripts/windows/setup-dev.ps1`.
+The Windows bootstrap script already downloads the pinned model set via `scripts/windows/setup-dev.ps1`.
 
 Manual download remains available if you need to refresh individual files:
 
@@ -345,7 +346,7 @@ wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/me
 ### Windows — VB-Cable (recommended)
 
 1. Download and install [VB-Audio Virtual Cable](https://vb-audio.com/Cable/).
-2. In `config/pipeline.toml`, set:
+2. In `config/pipeline.windows.toml`, set:
    ```toml
    [audio]
    output_device = "CABLE Input"   # substring match against PortAudio device name
@@ -353,7 +354,7 @@ wget https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/me
 3. In Google Meet / Zoom / Teams, select **CABLE Output** as the microphone.
 
 > **Tip:** Use `--audio.output_device "CABLE Input"` on the CLI to override without editing the TOML.
-> Phase 3 Windows config: use `config/pipeline.windows.toml` as the baseline real-audio config.
+> For the real Windows path, use `config/pipeline.windows.toml` as the baseline config.
 
 ### Linux — PipeWire (recommended)
 
