@@ -27,40 +27,28 @@ option(MEV_ENABLE_LIBSAMPLERATE   "Enable libsamplerate for high-quality resampl
 option(MEV_ENABLE_GPU             "Enable GPU execution paths (CUDA via backends)" OFF)
 option(MEV_ENABLE_PROFILING       "Enable pipeline profiling macros (MEV_PROFILE_SCOPE)" OFF)
 option(MEV_FETCH_DEPS             "Allow FetchContent dependency downloads (e.g. toml++)" OFF)
+set(MEV_TOMLPLUSPLUS_SOURCE_DIR "" CACHE PATH "Path to a local toml++ checkout")
+set(MEV_WHISPER_SOURCE_DIR "" CACHE PATH "Path to a local whisper.cpp checkout")
+set(MEV_LIBFVAD_SOURCE_DIR "" CACHE PATH "Path to a local libfvad checkout")
 
 # ---------------------------------------------------------------------------
-# Fetch toml++ (header-only, always fetched — used for TOML config loader)
+# Dependency bootstrap
 # ---------------------------------------------------------------------------
-include(FetchContent)
-FetchContent_Declare(
-  tomlplusplus
-  GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
-  GIT_TAG        v3.4.0
-)
-FetchContent_MakeAvailable(tomlplusplus)
+include(cmake/MevDependencies.cmake)
+mev_enable_tomlplusplus()
 
 # ---------------------------------------------------------------------------
-# Optional: fetch whisper.cpp ASR backend
+# Optional: enable whisper.cpp ASR backend
 # ---------------------------------------------------------------------------
 if(MEV_ENABLE_WHISPER_CPP)
-  FetchContent_Declare(whisper
-    GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
-    GIT_TAG        v1.7.4
-  )
-  set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  FetchContent_MakeAvailable(whisper)
+  mev_enable_whispercpp()
 endif()
 
 # ---------------------------------------------------------------------------
-# Optional: fetch libfvad (WebRTC VAD)
+# Optional: enable libfvad (WebRTC VAD)
 # ---------------------------------------------------------------------------
 if(MEV_ENABLE_WEBRTCVAD)
-  FetchContent_Declare(libfvad
-    GIT_REPOSITORY https://github.com/dpirch/libfvad.git
-    GIT_TAG        master
-  )
-  FetchContent_MakeAvailable(libfvad)
+  mev_enable_libfvad()
 endif()
 
 include(cmake/CompilerWarnings.cmake)

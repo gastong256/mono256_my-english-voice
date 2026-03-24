@@ -22,6 +22,7 @@
       "inherits": ["base"],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
+        "MEV_FETCH_DEPS": "ON",
         "MEV_ENABLE_SANITIZERS": "OFF",
         "MEV_BUILD_TESTS": "ON",
         "MEV_BUILD_BENCHMARKS": "ON"
@@ -32,6 +33,7 @@
       "inherits": ["base"],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "MEV_FETCH_DEPS": "ON",
         "MEV_BUILD_TESTS": "ON",
         "MEV_BUILD_BENCHMARKS": "ON"
       }
@@ -41,9 +43,62 @@
       "inherits": ["base"],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MEV_FETCH_DEPS": "ON",
         "MEV_ENABLE_SANITIZERS": "ON",
         "MEV_BUILD_TESTS": "ON",
         "MEV_BUILD_BENCHMARKS": "OFF"
+      }
+    },
+    {
+      "name": "windows-msvc-base",
+      "hidden": true,
+      "inherits": ["base"],
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$penv{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "MEV_FETCH_DEPS": "ON",
+        "MEV_BUILD_TESTS": "ON",
+        "MEV_BUILD_BENCHMARKS": "OFF"
+      }
+    },
+    {
+      "name": "windows-msvc-debug",
+      "inherits": ["windows-msvc-base"],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MEV_ENABLE_SANITIZERS": "OFF"
+      }
+    },
+    {
+      "name": "windows-msvc-release",
+      "inherits": ["windows-msvc-base"],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "windows-msvc-full",
+      "inherits": ["windows-msvc-release"],
+      "cacheVariables": {
+        "MEV_ENABLE_GPU": "ON",
+        "MEV_ENABLE_PORTAUDIO": "ON",
+        "MEV_ENABLE_WHISPER_CPP": "ON",
+        "MEV_ENABLE_ONNXRUNTIME": "ON",
+        "MEV_ENABLE_ESPEAK": "ON",
+        "MEV_ENABLE_LIBSAMPLERATE": "ON",
+        "MEV_ENABLE_WEBRTCVAD": "ON",
+        "ONNXRUNTIME_ROOT": "$penv{ONNXRUNTIME_ROOT}"
+      }
+    },
+    {
+      "name": "windows-msvc-smoke",
+      "inherits": ["windows-msvc-debug"],
+      "cacheVariables": {
+        "MEV_ENABLE_PORTAUDIO": "ON",
+        "MEV_ENABLE_WHISPER_CPP": "ON",
+        "MEV_ENABLE_ESPEAK": "ON"
       }
     }
   ],
@@ -59,12 +114,49 @@
     {
       "name": "asan",
       "configurePreset": "asan"
+    },
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug"
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release"
+    },
+    {
+      "name": "windows-msvc-full",
+      "configurePreset": "windows-msvc-full"
+    },
+    {
+      "name": "windows-msvc-smoke",
+      "configurePreset": "windows-msvc-smoke"
     }
   ],
   "testPresets": [
     {
       "name": "debug",
       "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-smoke",
+      "configurePreset": "windows-msvc-smoke",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-msvc-full",
+      "configurePreset": "windows-msvc-full",
       "output": {
         "outputOnFailure": true
       }

@@ -45,6 +45,8 @@ build/
 
 # Claude Code session data (local only)
 .claude/
+.tmp/
+.local/
 
 # Downloaded model weights (can be large; re-download with scripts in README)
 models/

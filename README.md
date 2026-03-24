@@ -84,16 +84,25 @@ When ASR is running, TTS falls back to CPU automatically
 
 | Library | Purpose | Flag | Status |
 |---------|---------|------|--------|
-| [toml++](https://github.com/marzer/tomlplusplus) | Config parser | always on (FetchContent) | Active |
-| [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | ASR inference | `MEV_ENABLE_WHISPER_CPP` | FetchContent v1.7.4 |
+| [toml++](https://github.com/marzer/tomlplusplus) | Config parser | always on | `find_package`, local source override, or FetchContent |
+| [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | ASR inference | `MEV_ENABLE_WHISPER_CPP` | Local source override or FetchContent v1.7.4 |
 | [ONNX Runtime](https://github.com/microsoft/onnxruntime) | Piper TTS | `MEV_ENABLE_ONNXRUNTIME` | Pre-built binary |
 | [Piper TTS](https://github.com/rhasspy/piper) | Primary TTS backend | `MEV_ENABLE_ONNXRUNTIME` | Stub until ONNX linked |
 | [eSpeak-ng](https://github.com/espeak-ng/espeak-ng) | TTS fallback | `MEV_ENABLE_ESPEAK` | Real synthesis |
 | [PortAudio](http://www.portaudio.com/) | Real audio I/O | `MEV_ENABLE_PORTAUDIO` | Real I/O |
 | [libsamplerate](https://libsndfile.github.io/libsamplerate/) | ASR/TTS resampling | `MEV_ENABLE_LIBSAMPLERATE` | Real resampling |
-| [libfvad](https://github.com/dpirch/libfvad) | Voice activity detection | `MEV_ENABLE_WEBRTCVAD` | FetchContent |
+| [libfvad](https://github.com/dpirch/libfvad) | Voice activity detection | `MEV_ENABLE_WEBRTCVAD` | Local source override or FetchContent |
 
 C++ standard: **C++20** (requires GCC ≥ 13 or Clang ≥ 16).
+
+### Dependency modes
+
+- `MEV_FETCH_DEPS=ON`: allows CMake to download fetchable dependencies (`toml++`, `whisper.cpp`, `libfvad`).
+- `MEV_FETCH_DEPS=OFF`: forbids downloads. Configure fails fast unless dependencies are already installed or provided locally.
+- Local source overrides supported by CMake:
+  - `-DMEV_TOMLPLUSPLUS_SOURCE_DIR=/abs/path/to/tomlplusplus`
+  - `-DMEV_WHISPER_SOURCE_DIR=/abs/path/to/whisper.cpp`
+  - `-DMEV_LIBFVAD_SOURCE_DIR=/abs/path/to/libfvad`
 
 ---
 
@@ -118,11 +127,11 @@ sudo apt install libespeak-ng-dev
 # Resampling (for -DMEV_ENABLE_LIBSAMPLERATE=ON)
 sudo apt install libsamplerate0-dev
 
-# VAD — libfvad is fetched automatically via FetchContent when
-# -DMEV_ENABLE_WEBRTCVAD=ON; no apt package needed.
+# VAD — libfvad can be fetched by CMake when
+# -DMEV_ENABLE_WEBRTCVAD=ON -DMEV_FETCH_DEPS=ON; no apt package needed.
 
-# whisper.cpp — fetched automatically via FetchContent when
-# -DMEV_ENABLE_WHISPER_CPP=ON; no apt package needed.
+# whisper.cpp — can be fetched by CMake when
+# -DMEV_ENABLE_WHISPER_CPP=ON -DMEV_FETCH_DEPS=ON; no apt package needed.
 ```
 
 ### Linux — ONNX Runtime (for Piper TTS with -DMEV_ENABLE_ONNXRUNTIME=ON)
@@ -137,38 +146,21 @@ export ONNXRUNTIME_ROOT=$(pwd)/onnxruntime-linux-x64-gpu-1.17.3
 
 - **Visual Studio 2022** (MSVC v143) or later, with the **C++ CMake tools** workload
 - **CMake ≥ 3.25** and **Ninja** (both bundled with VS2022)
-- **vcpkg** (recommended for native libs):
-
-```powershell
-git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
-C:\vcpkg\bootstrap-vcpkg.bat
-# Integrate with MSBuild/CMake
-C:\vcpkg\vcpkg integrate install
-```
+- A checkout on a Windows-visible path, recommended:
+  - `C:\dev\my-english-voice`
+  - opened from WSL2 as `/mnt/c/dev/my-english-voice`
+- PowerShell execution policy that allows local project scripts:
+  - `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
 ### Windows — Optional backends via vcpkg
 
-```powershell
-# Audio I/O
-vcpkg install portaudio:x64-windows
-
-# TTS fallback
-vcpkg install espeak-ng:x64-windows
-
-# Resampling
-vcpkg install libsamplerate:x64-windows
-```
+- `portaudio:x64-windows`
+- `espeak-ng:x64-windows`
+- `libsamplerate:x64-windows`
 
 ### Windows — ONNX Runtime
 
-Download the pre-built package from GitHub Releases:
-
-```powershell
-# GPU build (CUDA 12)
-Invoke-WebRequest -Uri https://github.com/microsoft/onnxruntime/releases/download/v1.17.3/onnxruntime-win-x64-gpu-1.17.3.zip -OutFile onnxruntime.zip
-Expand-Archive onnxruntime.zip -DestinationPath .
-$env:ONNXRUNTIME_ROOT = "$PWD\onnxruntime-win-x64-gpu-1.17.3"
-```
+The Phase 1 bootstrap script downloads the pinned ONNX Runtime package into `.local/onnxruntime/`.
 
 ---
 
@@ -182,11 +174,22 @@ cmake --build --preset debug -j$(nproc)
 ctest --preset debug --output-on-failure
 ```
 
+These Linux presets default to `MEV_FETCH_DEPS=ON` so a fresh checkout can bootstrap fetchable dependencies.
+
+### Minimal build without downloads
+
+```bash
+cmake -S . -B build/offline -G Ninja -DMEV_FETCH_DEPS=OFF
+```
+
+If required fetchable dependencies are not installed or provided locally, configure fails with an explicit message instead of attempting network access.
+
 ### Full build — Linux (all real backends)
 
 ```bash
 cmake -B build/release \
   -DCMAKE_BUILD_TYPE=Release \
+  -DMEV_FETCH_DEPS=ON \
   -DMEV_ENABLE_GPU=ON \
   -DMEV_ENABLE_PORTAUDIO=ON \
   -DMEV_ENABLE_WHISPER_CPP=ON \
@@ -198,45 +201,58 @@ cmake -B build/release \
 cmake --build build/release -j$(nproc)
 ```
 
-### Full build — Windows (MSVC + vcpkg)
+### Phase 1 bootstrap — Windows
 
-Open a **Developer PowerShell for VS 2022**, then:
+Open PowerShell in the repo root and run:
 
 ```powershell
-cmake -B build\release -G Ninja `
-  -DCMAKE_BUILD_TYPE=Release `
-  -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
-  -DVCPKG_TARGET_TRIPLET=x64-windows `
-  -DMEV_ENABLE_GPU=ON `
-  -DMEV_ENABLE_PORTAUDIO=ON `
-  -DMEV_ENABLE_WHISPER_CPP=ON `
-  -DMEV_ENABLE_ONNXRUNTIME=ON `
-  -DMEV_ENABLE_ESPEAK=ON `
-  -DMEV_ENABLE_LIBSAMPLERATE=ON `
-  -DMEV_ENABLE_WEBRTCVAD=ON `
-  -DONNXRUNTIME_ROOT="$env:ONNXRUNTIME_ROOT"
-cmake --build build\release
+.\scripts\windows\setup-dev.ps1
+.\scripts\windows\build.ps1 -Preset windows-msvc-debug
+.\scripts\windows\test.ps1 -Preset windows-msvc-debug
 ```
 
-`onnxruntime.dll` is copied automatically next to the executable.
+The setup script:
 
-### Selective feature build
+- clones and bootstraps `vcpkg` into `.local/vcpkg` by default
+- installs native Windows packages via `vcpkg`
+- downloads the pinned ONNX Runtime package into `.local/onnxruntime/`
+- downloads pinned models into `models/`
+- writes `.local/windows-dev-env.ps1` with `VCPKG_ROOT` and `ONNXRUNTIME_ROOT`
 
-```bash
-# PortAudio + eSpeak only (no GPU)
-cmake -B build/audio \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DMEV_ENABLE_PORTAUDIO=ON \
-  -DMEV_ENABLE_ESPEAK=ON \
-  -DMEV_ENABLE_LIBSAMPLERATE=ON
-cmake --build build/audio -j$(nproc)
-```
+### Windows presets
+
+- `windows-msvc-debug`: Windows debug build with `vcpkg` toolchain and fetchable deps enabled
+- `windows-msvc-release`: Windows release build with `vcpkg` toolchain and fetchable deps enabled
+- `windows-msvc-full`: enables all current real backend flags
+- `windows-msvc-smoke`: lightweight Windows smoke build with `PortAudio`, `Whisper`, and `eSpeak`
+
+All Windows presets read:
+
+- `VCPKG_ROOT`
+- `ONNXRUNTIME_ROOT`
 
 ### Enable profiling macros
 
 ```bash
 cmake --preset debug -DMEV_ENABLE_PROFILING=ON
 ```
+
+### Phase 1 workflow — WSL2 driving Windows
+
+Run these from WSL2 only when the repo lives under `/mnt/<drive>/...`:
+
+```bash
+./scripts/wsl/windows-build.sh --preset windows-msvc-debug
+./scripts/wsl/windows-test.sh --preset windows-msvc-debug
+./scripts/wsl/windows-run.sh --preset windows-msvc-debug --config config/pipeline.toml
+```
+
+The WSL2 wrappers:
+
+- validate the checkout path
+- convert repo/config paths with `wslpath`
+- invoke PowerShell deterministically
+- fail fast if the repo is inside `/home` instead of a Windows-visible mount
 
 ### Tests
 
@@ -262,6 +278,10 @@ ctest --preset debug --output-on-failure
 ---
 
 ## Download models
+
+Phase 1 bootstrap on Windows already downloads the pinned model set via `scripts/windows/setup-dev.ps1`.
+
+Manual download remains available if you need to refresh individual files:
 
 ```bash
 mkdir -p models
@@ -370,7 +390,7 @@ Press **Ctrl+C** to stop cleanly (SIGINT triggers graceful shutdown).
 
 ## Configuration
 
-Main config: `config/pipeline.toml` — parsed by toml++ (always linked via FetchContent).
+Main config: `config/pipeline.toml` — parsed by toml++ (resolved via package, local source override, or FetchContent depending on `MEV_FETCH_DEPS`).
 
 Domain vocabulary: `config/tech_glossary.toml`
 - `[corrections]` — ASR post-processing (Whisper mis-transcriptions → correct term)
