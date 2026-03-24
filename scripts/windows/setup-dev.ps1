@@ -54,12 +54,12 @@ function Invoke-MevVcpkgInstall {
 
   $packageName = [string]$PackageSpec.name
   $required = $true
-  if ($null -ne $PackageSpec.required) {
+  if ($PackageSpec.PSObject.Properties.Name -contains 'required') {
     $required = [bool]$PackageSpec.required
   }
 
   $packageNote = ""
-  if ($null -ne $PackageSpec.note) {
+  if ($PackageSpec.PSObject.Properties.Name -contains 'note') {
     $packageNote = [string]$PackageSpec.note
   }
 
