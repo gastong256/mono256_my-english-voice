@@ -31,6 +31,9 @@ class WhisperASREngine final : public IASREngine {
   bool warmup(std::string& error) override;
   [[nodiscard]] AsrPartialHypothesis transcribe_incremental(const AsrRequest& request) override;
   [[nodiscard]] std::string name() const override { return "whisper.cpp"; }
+  [[nodiscard]] bool gpu_requested() const override { return enable_gpu_; }
+  [[nodiscard]] bool using_gpu() const override { return gpu_active_; }
+  [[nodiscard]] std::string runtime_summary() const override { return runtime_summary_; }
 
   // Update the ASR domain prompt (called before inference from asr_loop).
   void set_domain_prompt(const std::string& prompt);
@@ -49,6 +52,9 @@ class WhisperASREngine final : public IASREngine {
   bool translate_;
   std::string quantization_;
   std::string domain_prompt_;
+  bool gpu_active_{false};
+  bool warmed_up_{false};
+  std::string runtime_summary_{"provider=uninitialized"};
   std::atomic<std::uint64_t> inference_count_{0};
 };
 

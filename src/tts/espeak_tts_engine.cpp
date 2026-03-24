@@ -43,17 +43,20 @@ bool EspeakTTSEngine::initialize(const TTSConfig& /*config*/, std::string& error
   espeak_SetParameter(espeakVOLUME, 90,  0);
 
   initialized_ = true;
+  warmed_up_ = false;
+  runtime_summary_ = "provider=cpu requested_device=cpu effective_device=cpu";
   MEV_LOG_INFO("EspeakTTSEngine initialised, sample_rate=", sample_rate_);
   return true;
 #else
   error = "EspeakTTSEngine: espeak-ng not compiled in (MEV_ENABLE_ESPEAK=OFF)";
+  runtime_summary_ = "provider=unavailable requested_device=cpu reason=MEV_ENABLE_ESPEAK=OFF";
   MEV_LOG_ERROR(error);
   return false;
 #endif
 }
 
 void EspeakTTSEngine::warmup() {
-  if (!initialized_) {
+  if (!initialized_ || warmed_up_) {
     return;
   }
 
@@ -62,6 +65,7 @@ void EspeakTTSEngine::warmup() {
     MEV_LOG_WARN("EspeakTTSEngine warmup failed");
     return;
   }
+  warmed_up_ = true;
   MEV_LOG_INFO("EspeakTTSEngine warmup done (generated ", pcm.size(), " samples)");
 }
 
@@ -109,6 +113,7 @@ void EspeakTTSEngine::shutdown() {
     return;
   }
   initialized_ = false;
+  warmed_up_ = false;
 #if defined(MEV_ENABLE_ESPEAK)
   espeak_Terminate();
   MEV_LOG_INFO("EspeakTTSEngine: terminated");

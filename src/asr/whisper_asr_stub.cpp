@@ -8,6 +8,12 @@ namespace mev {
 WhisperAsrStub::WhisperAsrStub(std::string model_path, const bool enable_gpu)
     : model_path_(std::move(model_path)), enable_gpu_(enable_gpu) {}
 
+std::string WhisperAsrStub::runtime_summary() const {
+  return std::string("provider=stub requested_device=") +
+         (enable_gpu_ ? "gpu" : "cpu") +
+         " effective_device=cpu reason=MEV_ENABLE_WHISPER_CPP=OFF";
+}
+
 bool WhisperAsrStub::warmup(std::string& error) {
   if (model_path_.empty()) {
     error = "ASR model path is empty";

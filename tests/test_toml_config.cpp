@@ -137,6 +137,45 @@ static void test_load_windows_smoke_pipeline_toml() {
             << " duration=" << cfg.runtime.run_duration_seconds << ")\n";
 }
 
+static void test_load_windows_cuda_pipeline_toml() {
+  std::string path;
+  for (const auto& candidate : {
+           "config/pipeline.windows.cuda.toml",
+           "../config/pipeline.windows.cuda.toml",
+           "../../config/pipeline.windows.cuda.toml",
+       }) {
+    if (std::filesystem::exists(candidate)) {
+      path = candidate;
+      break;
+    }
+  }
+
+  if (path.empty()) {
+    std::cout << "[SKIP] test_load_windows_cuda_pipeline_toml: config/pipeline.windows.cuda.toml not found\n";
+    return;
+  }
+
+  mev::AppConfig cfg = mev::default_config();
+  std::string error;
+  const bool ok = mev::load_config_from_file(path, cfg, error);
+  if (!ok) {
+    std::cerr << "[FAIL] test_load_windows_cuda_pipeline_toml: " << error << "\n";
+    std::exit(1);
+  }
+
+  assert(cfg.asr.enable_gpu &&
+         "Windows CUDA config must request GPU for ASR");
+  assert(cfg.tts.enable_gpu &&
+         "Windows CUDA config must request GPU for TTS");
+  assert(cfg.gpu.enabled &&
+         "Windows CUDA config must enable the shared GPU scheduler");
+  assert(cfg.tts.engine == "piper" &&
+         "Windows CUDA config must keep Piper as the primary TTS backend");
+
+  std::cout << "[PASS] test_load_windows_cuda_pipeline_toml (asr_gpu=" << cfg.asr.enable_gpu
+            << " tts_gpu=" << cfg.tts.enable_gpu << ")\n";
+}
+
 static void test_invalid_toml() {
   // Write a temp file with broken TOML.
   const std::string tmp = "/tmp/mev_test_invalid.toml";
@@ -184,6 +223,7 @@ int main() {
   test_load_pipeline_toml();
   test_load_windows_pipeline_toml();
   test_load_windows_smoke_pipeline_toml();
+  test_load_windows_cuda_pipeline_toml();
   test_invalid_toml();
   test_missing_file();
   test_validate_catches_bad_range();

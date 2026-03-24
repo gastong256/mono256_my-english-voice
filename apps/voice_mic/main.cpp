@@ -12,6 +12,7 @@
 #  include <windows.h>
 #else
 #  include <csignal>
+#  include <dlfcn.h>
 #endif
 
 #include "mev/asr/whisper_asr_stub.hpp"
@@ -40,6 +41,29 @@ enum class DeviceListMode : std::uint8_t {
   kInput,
   kOutput,
   kBoth,
+};
+
+struct SelfTestReport {
+  std::vector<std::string> info_lines;
+  std::vector<std::string> warning_lines;
+
+  void info(std::string line) {
+    info_lines.push_back(std::move(line));
+  }
+
+  void warn(std::string line) {
+    warning_lines.push_back(std::move(line));
+  }
+
+  void print() const {
+    for (const auto& line : info_lines) {
+      std::cerr << "[INFO] self-test: " << line << "\n";
+    }
+    for (const auto& line : warning_lines) {
+      std::cerr << "[WARN] self-test: " << line << "\n";
+    }
+    std::cerr << std::flush;
+  }
 };
 
 static void install_signal_handlers() {
@@ -80,6 +104,47 @@ static void print_usage(const char* prog) {
       << "                                 --tts.engine espeak\n"
       << "                                 --runtime.run_duration_seconds 60\n"
       << "  --help                    Print this help and exit\n";
+}
+
+static bool cuda_driver_available() {
+#ifdef _WIN32
+  HMODULE module = LoadLibraryA("nvcuda.dll");
+  if (module == nullptr) {
+    return false;
+  }
+  FreeLibrary(module);
+  return true;
+#else
+  void* handle = dlopen("libcuda.so.1", RTLD_LAZY | RTLD_LOCAL);
+  if (handle == nullptr) {
+    return false;
+  }
+  dlclose(handle);
+  return true;
+#endif
+}
+
+static bool ort_cuda_provider_dll_available(const std::string& argv0) {
+#if !defined(_WIN32)
+  (void)argv0;
+  return false;
+#else
+  std::vector<std::filesystem::path> candidates;
+  const auto exe_dir = std::filesystem::absolute(argv0).parent_path();
+  candidates.push_back(exe_dir / "onnxruntime_providers_cuda.dll");
+
+  if (const char* ort_root = std::getenv("ONNXRUNTIME_ROOT")) {
+    candidates.push_back(std::filesystem::path(ort_root) / "lib" / "onnxruntime_providers_cuda.dll");
+  }
+
+  for (const auto& candidate : candidates) {
+    if (!candidate.empty() && std::filesystem::exists(candidate)) {
+      return true;
+    }
+  }
+
+  return false;
+#endif
 }
 
 static bool make_audio_backends(const mev::AppConfig& cfg,
@@ -206,7 +271,8 @@ static bool validate_onnxruntime_runtime(const mev::AppConfig& cfg, const std::s
 #endif
 }
 
-static bool validate_audio_backend(const mev::AppConfig& cfg, std::string& error) {
+static bool validate_audio_backend(const mev::AppConfig& cfg, SelfTestReport& report,
+                                   std::string& error) {
   std::unique_ptr<mev::IAudioInput> audio_input;
   std::unique_ptr<mev::IAudioOutput> audio_output;
   if (!make_audio_backends(cfg, audio_input, audio_output, error)) {
@@ -236,12 +302,17 @@ static bool validate_audio_backend(const mev::AppConfig& cfg, std::string& error
 
   audio_input->stop();
   audio_output->stop();
+  report.info("audio input=" + audio_input->name() +
+              " output=" + audio_output->name() +
+              " simulated=" + std::string(cfg.runtime.use_simulated_audio ? "true" : "false"));
   return true;
 }
 
-static bool validate_asr_backend(const mev::AppConfig& cfg, std::string& error) {
+static bool validate_asr_backend(const mev::AppConfig& cfg, SelfTestReport& report,
+                                 std::string& error) {
 #if !defined(MEV_ENABLE_WHISPER_CPP)
   (void)cfg;
+  (void)report;
   error = "whisper.cpp is not compiled in (MEV_ENABLE_WHISPER_CPP=OFF)";
   return false;
 #else
@@ -252,11 +323,12 @@ static bool validate_asr_backend(const mev::AppConfig& cfg, std::string& error) 
   }
 
   if (engine->warmup(error)) {
+    report.info("asr backend=" + engine->name() + " " + engine->runtime_summary());
     return true;
   }
 
   if (cfg.asr.enable_gpu && cfg.resilience.gpu_failure_action == "fallback_cpu") {
-    std::cerr << "[WARN] ASR GPU warmup failed, retrying on CPU\n";
+    report.warn("ASR GPU warmup failed, retrying on CPU: " + error);
     auto cpu_cfg = cfg;
     cpu_cfg.asr.enable_gpu = false;
     if (cpu_cfg.asr.quantization == "f16") {
@@ -268,14 +340,19 @@ static bool validate_asr_backend(const mev::AppConfig& cfg, std::string& error) 
       error = "failed to create CPU fallback ASR engine";
       return false;
     }
-    return cpu_engine->warmup(error);
+    if (!cpu_engine->warmup(error)) {
+      return false;
+    }
+    report.info("asr backend=" + cpu_engine->name() + " " + cpu_engine->runtime_summary());
+    return true;
   }
 
   return false;
 #endif
 }
 
-static bool validate_tts_backend(const mev::AppConfig& cfg, std::string& error) {
+static bool validate_tts_backend(const mev::AppConfig& cfg, SelfTestReport& report,
+                                 std::string& error) {
   auto validate_engine = [&](const std::string& engine_name, std::string& out_error) -> bool {
     auto engine = make_tts_engine(engine_name, cfg, out_error);
     if (!engine) {
@@ -296,6 +373,7 @@ static bool validate_tts_backend(const mev::AppConfig& cfg, std::string& error) 
       return false;
     }
 
+    report.info("tts backend=" + engine->engine_name() + " " + engine->runtime_summary());
     engine->shutdown();
     return true;
   };
@@ -305,28 +383,40 @@ static bool validate_tts_backend(const mev::AppConfig& cfg, std::string& error) 
   }
 
   if (!cfg.tts.fallback_engine.empty() && cfg.tts.fallback_engine != cfg.tts.engine) {
-    std::cerr << "[WARN] primary TTS self-test failed, trying fallback '"
-              << cfg.tts.fallback_engine << "'\n";
+    report.warn("primary TTS self-test failed, trying fallback '" +
+                cfg.tts.fallback_engine + "'");
     return validate_engine(cfg.tts.fallback_engine, error);
   }
 
   return false;
 }
 
-static bool run_self_test(const mev::AppConfig& cfg, const std::string& argv0, std::string& error) {
+static bool run_self_test(const mev::AppConfig& cfg, const std::string& argv0,
+                          SelfTestReport& report, std::string& error) {
+  const bool wants_gpu = cfg.asr.enable_gpu || cfg.tts.enable_gpu;
+  if (wants_gpu) {
+    report.info(std::string("cuda driver runtime=") +
+                (cuda_driver_available() ? "present" : "missing"));
+  }
+
+  if (requires_piper_runtime(cfg) && cfg.tts.enable_gpu) {
+    report.info(std::string("onnx cuda provider dll=") +
+                (ort_cuda_provider_dll_available(argv0) ? "present" : "missing"));
+  }
+
   if (!validate_model_paths(cfg, error)) {
     return false;
   }
   if (!validate_onnxruntime_runtime(cfg, argv0, error)) {
     return false;
   }
-  if (!validate_audio_backend(cfg, error)) {
+  if (!validate_audio_backend(cfg, report, error)) {
     return false;
   }
-  if (!validate_asr_backend(cfg, error)) {
+  if (!validate_asr_backend(cfg, report, error)) {
     return false;
   }
-  if (!validate_tts_backend(cfg, error)) {
+  if (!validate_tts_backend(cfg, report, error)) {
     return false;
   }
   return true;
@@ -510,10 +600,13 @@ int main(int argc, char** argv) {
 
   if (self_test) {
     mev::Logger::instance().set_level(config.logging.level);
-    if (!run_self_test(config, argv[0], error)) {
+    SelfTestReport report;
+    if (!run_self_test(config, argv[0], report, error)) {
+      report.print();
       std::cerr << "[FAIL] self-test: " << error << "\n";
       return 1;
     }
+    report.print();
     std::cout << "[PASS] self-test: config, models, audio backend, ASR, and TTS validated\n";
     return 0;
   }

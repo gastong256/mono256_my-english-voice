@@ -269,6 +269,9 @@ ctest --preset debug --output-on-failure
 ./scripts/wsl/windows-test.sh --preset windows-msvc-full
 ./scripts/wsl/windows-self-test.sh --preset windows-msvc-full --config config/pipeline.windows.toml
 ./scripts/wsl/windows-run.sh --preset windows-msvc-full --config config/pipeline.windows.toml
+
+# Windows CUDA validation path
+./scripts/wsl/windows-self-test.sh --preset windows-msvc-full --config config/pipeline.windows.cuda.toml
 ```
 
 Official smoke path from WSL2:
@@ -447,6 +450,8 @@ Windows real-audio baseline config: `config/pipeline.windows.toml`
 
 Windows smoke config for the lightweight preset: `config/pipeline.windows.smoke.toml`
 
+Windows CUDA validation config: `config/pipeline.windows.cuda.toml`
+
 - `runtime.use_simulated_audio = false`
 - `audio.output_device = "CABLE Input"`
 - `asr.model_path = "models/ggml-small.bin"`
@@ -467,6 +472,14 @@ TTS behavior today:
 - `espeak` remains the required fallback backend
 - if the primary TTS path fails during synthesis, the pipeline degrades and retries with `espeak`
 - `config/pipeline.windows.smoke.toml` uses `espeak` as both primary and fallback so the smoke preset does not require ONNX Runtime
+- `config/pipeline.windows.cuda.toml` requests GPU for both ASR and Piper so `--self-test` can report effective GPU/CPU placement on Windows
+
+Self-test diagnostics today:
+
+- `--self-test` reports the selected audio backend
+- when GPU is requested, it reports CUDA driver runtime visibility
+- when Piper GPU is requested on Windows, it reports whether `onnxruntime_providers_cuda.dll` is visible
+- ASR and TTS backends report requested vs effective placement (`cuda` or `cpu`)
 
 Current supported VAD values:
 

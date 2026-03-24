@@ -26,11 +26,16 @@ class EspeakTTSEngine final : public ITTSEngine {
   [[nodiscard]] bool synthesize(const std::string& text, std::vector<float>& pcm_out) override;
   [[nodiscard]] int output_sample_rate() const override { return sample_rate_; }
   [[nodiscard]] std::string engine_name() const override { return "espeak"; }
+  [[nodiscard]] bool gpu_requested() const override { return false; }
+  [[nodiscard]] bool using_gpu() const override { return false; }
+  [[nodiscard]] std::string runtime_summary() const override { return runtime_summary_; }
   void shutdown() override;
 
  private:
   bool initialized_{false};
+  bool warmed_up_{false};
   int sample_rate_{22050};
+  std::string runtime_summary_{"provider=cpu requested_device=cpu"};
 };
 
 }  // namespace mev

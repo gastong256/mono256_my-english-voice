@@ -15,6 +15,20 @@
 
 #include "mev/core/logger.hpp"
 
+#if defined(MEV_ENABLE_ONNXRUNTIME)
+#if __has_include(<cuda_provider_factory.h>)
+#include <cuda_provider_factory.h>
+#define MEV_HAS_ORT_CUDA_PROVIDER_FACTORY 1
+#elif __has_include(<onnxruntime/core/providers/cuda/cuda_provider_factory.h>)
+#include <onnxruntime/core/providers/cuda/cuda_provider_factory.h>
+#define MEV_HAS_ORT_CUDA_PROVIDER_FACTORY 1
+#else
+#define MEV_HAS_ORT_CUDA_PROVIDER_FACTORY 0
+#endif
+#else
+#define MEV_HAS_ORT_CUDA_PROVIDER_FACTORY 0
+#endif
+
 #if defined(MEV_ENABLE_ESPEAK)
 #include <espeak-ng/speak_lib.h>
 #endif
@@ -297,6 +311,36 @@ std::vector<char32_t> apply_phoneme_map(const std::vector<char32_t>& input,
   return output;
 }
 
+#if defined(MEV_ENABLE_ONNXRUNTIME)
+bool try_enable_cuda_provider(Ort::SessionOptions& session_options, int device_id,
+                              std::string& reason) {
+#if MEV_HAS_ORT_CUDA_PROVIDER_FACTORY
+  try {
+    OrtCUDAProviderOptions cuda_options{};
+    cuda_options.device_id = device_id;
+    const OrtApi& api = Ort::GetApi();
+    OrtStatus* status = api.SessionOptionsAppendExecutionProvider_CUDA(
+        session_options, &cuda_options);
+    if (status != nullptr) {
+      reason = api.GetErrorMessage(status);
+      api.ReleaseStatus(status);
+      return false;
+    }
+    reason.clear();
+    return true;
+  } catch (const Ort::Exception& ex) {
+    reason = ex.what();
+    return false;
+  }
+#else
+  (void)session_options;
+  (void)device_id;
+  reason = "CUDA execution provider headers are unavailable in this build";
+  return false;
+#endif
+}
+#endif
+
 }  // namespace
 
 bool PiperTTSEngine::assets_exist(std::string& error) const {
@@ -393,6 +437,22 @@ bool PiperTTSEngine::load_onnx_session(std::string& error) {
     session_options.SetIntraOpNumThreads(1);
     session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
+    gpu_active_ = false;
+    runtime_summary_ = std::string("provider=cpu requested_device=") +
+                       (config_.gpu_enabled ? "gpu" : "cpu");
+
+    if (config_.gpu_enabled) {
+      std::string cuda_reason;
+      if (try_enable_cuda_provider(session_options, 0, cuda_reason)) {
+        gpu_active_ = true;
+        runtime_summary_ = "provider=cuda requested_device=gpu";
+      } else {
+        runtime_summary_ = "provider=cpu requested_device=gpu reason=" + cuda_reason;
+        MEV_LOG_WARN("PiperTTSEngine: CUDA execution provider unavailable, "
+                     "falling back to CPU: ", cuda_reason);
+      }
+    }
+
 #if defined(_WIN32)
     const std::wstring model_path = std::filesystem::path(config_.model_path).wstring();
     session_ = std::make_unique<Ort::Session>(*ort_env_, model_path.c_str(), session_options);
@@ -415,6 +475,9 @@ bool PiperTTSEngine::initialize(const TTSConfig& config, std::string& error) {
   config_ = config;
   output_sample_rate_ = static_cast<int>(config.output_sample_rate);
   initialized_ = false;
+  warmed_up_ = false;
+  gpu_active_ = false;
+  runtime_summary_ = "provider=uninitialized";
 
 #if defined(MEV_ENABLE_ONNXRUNTIME)
   if (!assets_exist(error)) {
@@ -462,18 +525,21 @@ bool PiperTTSEngine::initialize(const TTSConfig& config, std::string& error) {
                " gpu_requested=", config_.gpu_enabled,
                " sr=", output_sample_rate_,
                " speakers=", num_speakers_,
-               " model='", config_.model_path,
-               "')");
+                " model='", config_.model_path,
+               "' ", runtime_summary_, ")");
   return true;
 #else
   error = "PiperTTSEngine: ONNX Runtime not compiled in (MEV_ENABLE_ONNXRUNTIME=OFF)";
+  runtime_summary_ = std::string("provider=unavailable requested_device=") +
+                     (config_.gpu_enabled ? "gpu" : "cpu") +
+                     " reason=MEV_ENABLE_ONNXRUNTIME=OFF";
   MEV_LOG_ERROR(error);
   return false;
 #endif
 }
 
 void PiperTTSEngine::warmup() {
-  if (!initialized_) {
+  if (!initialized_ || warmed_up_) {
     return;
   }
 
@@ -483,6 +549,7 @@ void PiperTTSEngine::warmup() {
     return;
   }
 
+  warmed_up_ = true;
   MEV_LOG_INFO("PiperTTSEngine warmup done (generated ", pcm.size(), " samples)");
 }
 
@@ -698,6 +765,8 @@ bool PiperTTSEngine::synthesize(const std::string& text, std::vector<float>& pcm
 
 void PiperTTSEngine::shutdown() {
   initialized_ = false;
+  warmed_up_ = false;
+  gpu_active_ = false;
 #if defined(MEV_ENABLE_ONNXRUNTIME)
   session_.reset();
   ort_env_.reset();

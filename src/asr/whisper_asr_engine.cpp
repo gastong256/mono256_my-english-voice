@@ -27,13 +27,16 @@ bool WhisperASREngine::warmup(std::string& error) {
 #if defined(MEV_ENABLE_WHISPER_CPP)
   if (model_path_.empty()) {
     error = "WhisperASREngine: model path is empty";
+    runtime_summary_ = "provider=unavailable requested_device=" +
+                       std::string(enable_gpu_ ? "gpu" : "cpu") +
+                       " reason=model path is empty";
     MEV_LOG_ERROR(error);
     return false;
   }
 
-  if (ctx_ != nullptr) {
-    whisper_free(ctx_);
-    ctx_ = nullptr;
+  if (warmed_up_ && ctx_ != nullptr) {
+    MEV_LOG_INFO("WhisperASREngine: reusing warmed context (", runtime_summary_, ")");
+    return true;
   }
 
   whisper_context_params cparams = whisper_context_default_params();
@@ -42,19 +45,40 @@ bool WhisperASREngine::warmup(std::string& error) {
   ctx_ = whisper_init_from_file_with_params(model_path_.c_str(), cparams);
   if (ctx_ == nullptr) {
     error = "WhisperASREngine: failed to load model from '" + model_path_ + "'";
+    gpu_active_ = false;
+    runtime_summary_ = "provider=unavailable requested_device=" +
+                       std::string(enable_gpu_ ? "gpu" : "cpu") +
+                       " reason=failed to load model";
     MEV_LOG_ERROR(error);
     return false;
   }
+
+#if defined(MEV_ENABLE_GPU)
+  gpu_active_ = enable_gpu_;
+#else
+  gpu_active_ = false;
+#endif
+
+  runtime_summary_ = std::string("provider=") + (gpu_active_ ? "cuda" : "cpu") +
+                     " requested_device=" + (enable_gpu_ ? "gpu" : "cpu");
+  if (enable_gpu_ && !gpu_active_) {
+    runtime_summary_ += " reason=MEV_ENABLE_GPU=OFF";
+  }
+  warmed_up_ = true;
 
   MEV_LOG_INFO("WhisperASREngine: model loaded from '", model_path_,
                "' gpu=", enable_gpu_,
                " language=", language_,
                " translate=", translate_,
-               " quantization=", quantization_);
+               " quantization=", quantization_,
+               " ", runtime_summary_);
   return true;
 #else
   MEV_LOG_WARN("WhisperASREngine: whisper.cpp not compiled (MEV_ENABLE_WHISPER_CPP=OFF)");
   error = "whisper.cpp not compiled in";
+  runtime_summary_ = "provider=stub requested_device=" +
+                     std::string(enable_gpu_ ? "gpu" : "cpu") +
+                     " reason=MEV_ENABLE_WHISPER_CPP=OFF";
   return false;
 #endif
 }

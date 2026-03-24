@@ -15,6 +15,9 @@ class WhisperAsrStub final : public IASREngine {
   bool warmup(std::string& error) override;
   [[nodiscard]] AsrPartialHypothesis transcribe_incremental(const AsrRequest& request) override;
   [[nodiscard]] std::string name() const override { return "whisper.cpp_stub"; }
+  [[nodiscard]] bool gpu_requested() const override { return enable_gpu_; }
+  [[nodiscard]] bool using_gpu() const override { return false; }
+  [[nodiscard]] std::string runtime_summary() const override;
 
  private:
   std::string model_path_;

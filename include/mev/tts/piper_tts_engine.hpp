@@ -38,6 +38,9 @@ class PiperTTSEngine final : public ITTSEngine {
   [[nodiscard]] bool synthesize(const std::string& text, std::vector<float>& pcm_out) override;
   [[nodiscard]] int output_sample_rate() const override { return output_sample_rate_; }
   [[nodiscard]] std::string engine_name() const override { return "piper"; }
+  [[nodiscard]] bool gpu_requested() const override { return config_.gpu_enabled; }
+  [[nodiscard]] bool using_gpu() const override { return gpu_active_; }
+  [[nodiscard]] std::string runtime_summary() const override { return runtime_summary_; }
   void shutdown() override;
 
  private:
@@ -54,6 +57,9 @@ class PiperTTSEngine final : public ITTSEngine {
   TTSConfig config_{};
   int output_sample_rate_{22050};
   bool initialized_{false};
+  bool warmed_up_{false};
+  bool gpu_active_{false};
+  std::string runtime_summary_{"provider=uninitialized"};
   std::string phoneme_type_{"text"};
   std::string espeak_voice_{"en"};
   std::uint32_t num_speakers_{1};

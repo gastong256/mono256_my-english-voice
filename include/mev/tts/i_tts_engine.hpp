@@ -42,6 +42,11 @@ class ITTSEngine {
   // Human-readable engine name for logging.
   [[nodiscard]] virtual std::string engine_name() const = 0;
 
+  // Runtime placement and provider status for self-tests and diagnostics.
+  [[nodiscard]] virtual bool gpu_requested() const = 0;
+  [[nodiscard]] virtual bool using_gpu() const = 0;
+  [[nodiscard]] virtual std::string runtime_summary() const = 0;
+
   // Release model handles and GPU memory.
   virtual void shutdown() = 0;
 };

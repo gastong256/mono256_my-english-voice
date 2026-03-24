@@ -23,6 +23,11 @@ class StubTTSEngine final : public ITTSEngine {
   [[nodiscard]] bool synthesize(const std::string& text, std::vector<float>& pcm_out) override;
   [[nodiscard]] int output_sample_rate() const override { return sample_rate_; }
   [[nodiscard]] std::string engine_name() const override { return "stub"; }
+  [[nodiscard]] bool gpu_requested() const override { return false; }
+  [[nodiscard]] bool using_gpu() const override { return false; }
+  [[nodiscard]] std::string runtime_summary() const override {
+    return "provider=stub requested_device=cpu effective_device=cpu";
+  }
   void shutdown() override;
 
  private:
