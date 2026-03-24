@@ -133,6 +133,9 @@ static bool ort_cuda_provider_dll_available(const std::string& argv0) {
   const auto exe_dir = std::filesystem::absolute(argv0).parent_path();
   candidates.push_back(exe_dir / "onnxruntime_providers_cuda.dll");
 
+  // MSVC deprecates getenv in favour of _dupenv_s (C4996). Suppress here;
+  // this block is already inside #if defined(_WIN32).
+#pragma warning(suppress : 4996)
   if (const char* ort_root = std::getenv("ONNXRUNTIME_ROOT")) {
     candidates.push_back(std::filesystem::path(ort_root) / "lib" / "onnxruntime_providers_cuda.dll");
   }
@@ -252,6 +255,7 @@ static bool validate_onnxruntime_runtime(const mev::AppConfig& cfg, const std::s
   const auto exe_dir = std::filesystem::absolute(argv0).parent_path();
   candidates.push_back(exe_dir / "onnxruntime.dll");
 
+#pragma warning(suppress : 4996)
   if (const char* ort_root = std::getenv("ONNXRUNTIME_ROOT")) {
     candidates.push_back(std::filesystem::path(ort_root) / "lib" / "onnxruntime.dll");
   }
@@ -624,8 +628,9 @@ int main(int argc, char** argv) {
   // Run until duration expires or signal received.
   // run_duration_seconds == 0 means run indefinitely until SIGINT/SIGTERM.
   const bool run_forever = (config.runtime.run_duration_seconds == 0);
+  // Extra parens around ::max prevent windows.h's max() macro from expanding.
   const auto deadline = run_forever
-      ? std::chrono::steady_clock::time_point::max()
+      ? (std::chrono::steady_clock::time_point::max)()
       : std::chrono::steady_clock::now() +
             std::chrono::seconds(config.runtime.run_duration_seconds);
   while (!g_shutdown_requested.load(std::memory_order_relaxed) &&
