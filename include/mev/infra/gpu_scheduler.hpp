@@ -21,6 +21,13 @@ namespace mev {
 //
 // Thread-safety: all methods are safe to call from any thread.
 // ---------------------------------------------------------------------------
+
+// C4324: structure padded due to alignment specifier — intentional; each
+// atomic lives on its own cache line to prevent false sharing.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
 class GpuScheduler {
  public:
   // ---- ASR side (always granted) ----------------------------------------
@@ -91,6 +98,9 @@ class GpuScheduler {
   // Diagnostic counter: incremented each time TTS is denied GPU access.
   alignas(64) std::atomic<std::uint64_t> gpu_contention_events_{0};
 };
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 // ---------------------------------------------------------------------------
 // RAII guard for ASR GPU acquisition.
