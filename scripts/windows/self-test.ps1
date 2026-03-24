@@ -22,7 +22,7 @@ Assert-MevWindowsCheckout -RepoRoot $repoRoot
 if ($BuildFirst) {
   & (Join-Path $PSScriptRoot "build.ps1") -RepoRoot $repoRoot -Preset $Preset -VcpkgRoot $env:VCPKG_ROOT -OnnxRuntimeRoot $env:ONNXRUNTIME_ROOT
   if ($LASTEXITCODE -ne 0) {
-    throw "Build failed before running the application."
+    throw "Build failed before running self-test."
   }
 }
 
@@ -32,14 +32,13 @@ if (-not (Test-Path -Path $exePath)) {
 }
 
 $resolvedConfigPath = Resolve-MevConfigPath -RepoRoot $repoRoot -ConfigPath $ConfigPath
-
 if (-not (Test-Path -Path $resolvedConfigPath)) {
   throw "Config file not found: $resolvedConfigPath"
 }
 
-$arguments = @("--config", $resolvedConfigPath)
+$arguments = @("--self-test", "--config", $resolvedConfigPath)
 if ($AppArgs.Count -gt 0) {
   $arguments += $AppArgs
 }
 
-Invoke-MevStep -Description "Running my-english-voice ($Preset)" -Command $exePath -Arguments $arguments -WorkingDirectory $repoRoot
+Invoke-MevStep -Description "Running self-test ($Preset)" -Command $exePath -Arguments $arguments -WorkingDirectory $repoRoot

@@ -244,15 +244,44 @@ All Windows presets read:
 cmake --preset debug -DMEV_ENABLE_PROFILING=ON
 ```
 
-### Phase 1 workflow — WSL2 driving Windows
+### Official workflow — WSL2 driving Windows
+
+Supported daily flow:
+
+1. Place the repo on Windows, for example `C:\dev\my-english-voice`
+2. Open it from WSL2 as `/mnt/c/dev/my-english-voice`
+3. Edit and run the Linux base suite from WSL2
+4. Build the native Windows binary with a WSL wrapper
+5. Run the Windows self-test with a WSL wrapper
+6. Run the Windows app with a WSL wrapper
 
 Run these from WSL2 only when the repo lives under `/mnt/<drive>/...`:
 
 ```bash
-./scripts/wsl/windows-build.sh --preset windows-msvc-debug
-./scripts/wsl/windows-test.sh --preset windows-msvc-debug
-./scripts/wsl/windows-run.sh --preset windows-msvc-debug
+# Linux-side fast feedback
+cmake --preset debug
+cmake --build --preset debug -j$(nproc)
+ctest --preset debug --output-on-failure
+
+# Windows build / validate / run
+./scripts/wsl/windows-build.sh --preset windows-msvc-full
+./scripts/wsl/windows-test.sh --preset windows-msvc-full
+./scripts/wsl/windows-self-test.sh --preset windows-msvc-full --config config/pipeline.windows.toml
+./scripts/wsl/windows-run.sh --preset windows-msvc-full --config config/pipeline.windows.toml
 ```
+
+Official smoke path from WSL2:
+
+```bash
+./scripts/wsl/windows-smoke.sh
+```
+
+That smoke wrapper performs:
+
+1. Windows build with `windows-msvc-smoke`
+2. Windows `ctest`
+3. Windows `--self-test`
+4. A short Windows run using `config/pipeline.windows.smoke.toml`
 
 The WSL2 wrappers:
 
@@ -260,6 +289,7 @@ The WSL2 wrappers:
 - convert repo/config paths with `wslpath`
 - invoke PowerShell deterministically
 - fail fast if the repo is inside `/home` instead of a Windows-visible mount
+- accept explicit `--config` where runtime config matters
 
 ### Tests
 
@@ -414,6 +444,8 @@ Main config: `config/pipeline.toml` — parsed by toml++ (resolved via package, 
 
 Windows real-audio baseline config: `config/pipeline.windows.toml`
 
+Windows smoke config for the lightweight preset: `config/pipeline.windows.smoke.toml`
+
 - `runtime.use_simulated_audio = false`
 - `audio.output_device = "CABLE Input"`
 - `asr.model_path = "models/ggml-small.bin"`
@@ -433,6 +465,7 @@ TTS behavior today:
 - `piper` is the primary backend for `config/pipeline.windows.toml`
 - `espeak` remains the required fallback backend
 - if the primary TTS path fails during synthesis, the pipeline degrades and retries with `espeak`
+- `config/pipeline.windows.smoke.toml` uses `espeak` as both primary and fallback so the smoke preset does not require ONNX Runtime
 
 Current supported VAD values:
 

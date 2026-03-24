@@ -146,6 +146,21 @@ function Get-MevExecutablePath {
   return (Join-Path $RepoRoot "build\$Preset\apps\voice_mic\mev_voice_mic.exe")
 }
 
+function Resolve-MevConfigPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$ConfigPath
+  )
+
+  if ($ConfigPath -match '^[A-Za-z]:\\') {
+    return $ConfigPath
+  }
+
+  return (Join-Path $RepoRoot $ConfigPath)
+}
+
 function Invoke-MevStep {
   param(
     [Parameter(Mandatory = $true)]

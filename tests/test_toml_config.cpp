@@ -98,6 +98,45 @@ static void test_load_windows_pipeline_toml() {
             << " gpu=" << cfg.asr.enable_gpu << ")\n";
 }
 
+static void test_load_windows_smoke_pipeline_toml() {
+  std::string path;
+  for (const auto& candidate : {
+           "config/pipeline.windows.smoke.toml",
+           "../config/pipeline.windows.smoke.toml",
+           "../../config/pipeline.windows.smoke.toml",
+       }) {
+    if (std::filesystem::exists(candidate)) {
+      path = candidate;
+      break;
+    }
+  }
+
+  if (path.empty()) {
+    std::cout << "[SKIP] test_load_windows_smoke_pipeline_toml: config/pipeline.windows.smoke.toml not found\n";
+    return;
+  }
+
+  mev::AppConfig cfg = mev::default_config();
+  std::string error;
+  const bool ok = mev::load_config_from_file(path, cfg, error);
+  if (!ok) {
+    std::cerr << "[FAIL] test_load_windows_smoke_pipeline_toml: " << error << "\n";
+    std::exit(1);
+  }
+
+  assert(!cfg.runtime.use_simulated_audio &&
+         "Windows smoke config must still use real audio");
+  assert(cfg.tts.engine == "espeak" &&
+         "Windows smoke config must use eSpeak as the primary TTS backend");
+  assert(cfg.tts.fallback_engine == "espeak" &&
+         "Windows smoke config must keep eSpeak as the fallback backend");
+  assert(cfg.runtime.run_duration_seconds == 3 &&
+         "Windows smoke config should keep a short runtime by default");
+
+  std::cout << "[PASS] test_load_windows_smoke_pipeline_toml (tts=" << cfg.tts.engine
+            << " duration=" << cfg.runtime.run_duration_seconds << ")\n";
+}
+
 static void test_invalid_toml() {
   // Write a temp file with broken TOML.
   const std::string tmp = "/tmp/mev_test_invalid.toml";
@@ -144,6 +183,7 @@ int main() {
   test_default_config();
   test_load_pipeline_toml();
   test_load_windows_pipeline_toml();
+  test_load_windows_smoke_pipeline_toml();
   test_invalid_toml();
   test_missing_file();
   test_validate_catches_bad_range();
