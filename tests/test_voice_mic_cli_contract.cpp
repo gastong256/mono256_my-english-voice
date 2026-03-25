@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 
-#if !defined(_WIN32)
+#ifdef _WIN32
+#include <crtdbg.h>
+#else
 #include <sys/wait.h>
 #endif
 
@@ -64,7 +66,16 @@ CommandResult run_voice_mic(const std::vector<std::string>& args) {
   }
   command += " > " + shell_quote(log_path) + " 2>&1";
 
+#ifdef _WIN32
+  // cmd.exe /c strips the leading and trailing double-quote when the command
+  // string itself starts with a double-quote (which it does — the exe path is
+  // shell-quoted).  Wrapping the whole command in an extra pair of double-
+  // quotes causes cmd.exe to strip the outer pair, leaving the inner quoting
+  // intact and preventing path corruption.
+  const int raw_exit_code = std::system(("\"" + command + "\"").c_str());
+#else
   const int raw_exit_code = std::system(command.c_str());
+#endif
 
   std::ifstream input(log_path);
   std::string output((std::istreambuf_iterator<char>(input)),
@@ -159,6 +170,14 @@ void test_self_test_reports_missing_model_clearly() {
 
 int main(int argc, char** argv) {
   assert(argc > 0);
+#if defined(_WIN32) && defined(_DEBUG)
+  // On headless CI, the MSVC CRT assert dialog blocks indefinitely.
+  // Route all assert/error reports to stderr so the process exits immediately.
+  _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+  _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+  _CrtSetReportMode(_CRT_ERROR,  _CRTDBG_MODE_FILE);
+  _CrtSetReportFile(_CRT_ERROR,  _CRTDBG_FILE_STDERR);
+#endif
   g_test_binary_path = fs::weakly_canonical(fs::path(argv[0]));
 
   test_help_mentions_public_flags();
