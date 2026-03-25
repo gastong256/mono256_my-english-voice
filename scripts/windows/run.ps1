@@ -26,6 +26,14 @@ if ($BuildFirst) {
   }
 }
 
+# whisper/ggml shared DLLs land in build/<preset>/bin.  Prepend that
+# directory to PATH so mev_voice_mic.exe can resolve them at startup.
+$buildBinDir = Join-Path $repoRoot "build" $Preset "bin"
+if (Test-Path $buildBinDir) {
+  $env:PATH = "$buildBinDir;$env:PATH"
+  Write-Host "==> DLL search path: $buildBinDir"
+}
+
 $exePath = Get-MevExecutablePath -RepoRoot $repoRoot -Preset $Preset
 if (-not (Test-Path -Path $exePath)) {
   throw "Executable not found: $exePath. Run build.ps1 first or use -BuildFirst."
