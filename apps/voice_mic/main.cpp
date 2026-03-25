@@ -496,6 +496,7 @@ static void apply_override(mev::AppConfig& cfg, const std::string& dotkey,
     else if (key == "model_path")          cfg.tts.model_path = value;
     else if (key == "enable_gpu")          to_bool(cfg.tts.enable_gpu);
     else if (key == "fallback_engine")     cfg.tts.fallback_engine = value;
+    else if (key == "preview_engine")      cfg.tts.preview_engine = value;
   } else if (section == "vad") {
     if      (key == "engine")              cfg.vad.engine = value;
   } else if (section == "logging") {
