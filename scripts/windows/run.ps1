@@ -6,7 +6,8 @@ param(
   [string]$VcpkgRoot,
   [string]$OnnxRuntimeRoot,
   [switch]$BuildFirst,
-  [string[]]$AppArgs = @()
+  [string[]]$AppArgs = @(),
+  [int]$TimeoutSeconds = 0
 )
 
 Set-StrictMode -Version Latest
@@ -50,4 +51,18 @@ if ($AppArgs.Count -gt 0) {
   $arguments += $AppArgs
 }
 
-Invoke-MevStep -Description "Running my-english-voice ($Preset)" -Command $exePath -Arguments $arguments -WorkingDirectory $repoRoot
+if ($TimeoutSeconds -gt 0) {
+  Write-Host "==> Running my-english-voice ($Preset) [timeout: ${TimeoutSeconds}s]"
+  $proc = Start-Process -FilePath $exePath -ArgumentList $arguments -WorkingDirectory $repoRoot -PassThru -NoNewWindow
+  $finished = $proc.WaitForExit($TimeoutSeconds * 1000)
+  if (-not $finished) {
+    Write-Host "==> Process did not exit within ${TimeoutSeconds}s — terminating"
+    $proc.Kill()
+    $proc.WaitForExit(5000) | Out-Null
+    Write-Host "==> Process killed (slow shutdown on CI is not a smoke failure)"
+  } elseif ($proc.ExitCode -ne 0) {
+    throw "Process exited with code $($proc.ExitCode)"
+  }
+} else {
+  Invoke-MevStep -Description "Running my-english-voice ($Preset)" -Command $exePath -Arguments $arguments -WorkingDirectory $repoRoot
+}

@@ -43,4 +43,4 @@ jobs:
       - name: Run short Windows smoke session with simulated audio
         shell: pwsh
         run: |
-          ./scripts/windows/run.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-ci -ConfigPath config/pipeline.windows.smoke.toml -AppArgs @('--runtime.use_simulated_audio', 'true', '--runtime.run_duration_seconds', '2', '--tts.engine', 'stub', '--tts.fallback_engine', 'stub', '--tts.preview_engine', 'stub')
+          ./scripts/windows/run.ps1 -RepoRoot $PWD.Path -Preset windows-msvc-ci -ConfigPath config/pipeline.windows.smoke.toml -TimeoutSeconds 30 -AppArgs @('--runtime.use_simulated_audio', 'true', '--runtime.run_duration_seconds', '2', '--tts.engine', 'stub', '--tts.fallback_engine', 'stub', '--tts.preview_engine', 'stub')
